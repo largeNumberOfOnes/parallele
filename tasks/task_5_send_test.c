@@ -171,11 +171,6 @@ int main (int argc, char* argv[]) {
         }
         RET_IF_ERR(1);
     }
-    
-    int buf_size = 0;
-    RET_IF_ERR(argc != 2);
-    buf_size = atoi(argv[1]);
-    RET_IF_ERR(!buf_size);
 
     const Type types[] = {_SEND, SSEND, RSEND, BSEND};
     int types_count = sizeof(types) / sizeof(types[0]);

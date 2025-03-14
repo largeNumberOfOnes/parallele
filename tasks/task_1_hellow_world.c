@@ -3,7 +3,7 @@
  */
 
 #include <stdio.h>
-#include "mpich/mpi.h"
+#include "mpi.h"
 
 #include "../slibs/err_proc.h"
 

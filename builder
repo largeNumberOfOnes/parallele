@@ -57,11 +57,13 @@ def search_task_name(task: str) -> str:
 
 def compile_task(task: str) -> None:
     print('compiling...')
-    os.system(f'mpicc {task}')
+    # os.system(f'mpicc {task}')
+    os.system(f'g++ {task}')
 
 def run_task(binary: str, nproc: int = 1, args: str = '') -> None:
     print('running...')
-    os.system(f'mpiexec -n {nproc} ./{binary} {args}')
+    # os.system(f'mpiexec -n {nproc} ./{binary} {args}')
+    os.system(f'./{binary} {args}')
 
 def parse_args():
     pass

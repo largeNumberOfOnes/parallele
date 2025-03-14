@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "mpich/mpi.h"
+#include "mpi.h"
 
 #include "../slibs/err_proc.h"
 

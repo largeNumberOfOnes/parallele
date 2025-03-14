@@ -6,8 +6,8 @@
 #include <iomanip>
 #include <iostream>
 #include <assert.h>
+#include "../slibs/err_proc.h"
 // #include "mpich/mpi.h"
-#include "err_proc.h"
 
 
 
@@ -19,8 +19,10 @@ class Decimal {
     uint32_t *arr;
     std::size_t point = 0;
     bool is_positive = true;
-    static constexpr uint32_t base = 1'000'000'00;
-    // static constexpr uint32_t base = 10'000;
+    // static constexpr uint32_t base = 1'000'000'000;
+    // static constexpr uint32_t base_len = 8;
+    static constexpr uint32_t base = 10'000;
+    static constexpr uint32_t base_len = 4;
 
     static constexpr std::size_t comp_size = sizeof(long unsigned int);
 
@@ -32,26 +34,53 @@ class Decimal {
             , point(size - 2)
             , is_positive(is_positive)
         {
+            for (int q = 0; q < size; ++q) {
+                arr[q] = 0;
+            }
             arr[0] = a;
         }
 
-        // Decimal(const char* str) {
-        //     assert(str);
-        //     std::size_t len = std::strlen(str);
-        //     // assert(!std::isdigit(str[0]) || str[0] == '-');
-        //     // for (std::size_t q = 1; q < len; ++q) {
-        //     //     assert(!std::isdigit(str[q]) || str[0] == '-');
-        //     // }
+        int dti(char digit) {
+            return digit - '0';
+        }
 
-        //     is_positive = str[0] == '-';
+        Decimal(const char* str) {
+            assert(str);
+            std::size_t len = std::strlen(str);
+            // assert(!std::isdigit(str[0]) || str[0] == '-');
+            // for (std::size_t q = 1; q < len; ++q) {
+            //     assert(!std::isdigit(str[q]) || str[0] == '-');
+            // }
 
-        //     for (std::size_t q = 1; q < len; ++q) {
-        //         switch (condition) {
-                
-        //         }
+            is_positive = str[0] == '-';
 
-            
-        // }
+            int comma_pos = 0;
+            uint32_t ved = 0;
+            while (str[++comma_pos] != '.') {}
+            uint32_t mult = 1;
+            for (int q = comma_pos; q > 0; --q) {
+                ved += dti(str[q-1]) * mult;
+                mult *= 10;
+            }
+            size = (len - comma_pos - 1) / base_len + 2;
+            std::cout << size << std::endl;
+            arr = new uint32_t[size];
+            arr[0] = ved;
+
+            for (int q = 1; q < size; ++q) {
+                arr[q] = 0;
+            }
+
+            for (int q = comma_pos+1; q < len; ++q) {
+                if ((q - comma_pos - 1) % base_len == 0) {
+                    mult = base;
+                }
+                mult /= 10;
+                arr[1 + ((q - comma_pos - 1) / base_len)] += dti(str[q]) * mult;
+            }
+
+
+        }
 
         ~Decimal() {
             delete [] arr;
@@ -108,20 +137,25 @@ class Decimal {
         }
 
         Decimal& operator*=(const Decimal& other) {
-            uint32_t* buf = new uint32_t[size];
+            uint32_t* buf = new uint32_t[size+1];
+
             for (int q = 0; q < size; ++q) {
-                for (int w = 0; w < size - q; ++w) {
-                    buf[q + w] += arr[q] * other.arr[w];
+                for (int w = 0; w < size; ++w) {
+                    if (q + w < size+1) {
+                        buf[q + w] += arr[q] * other.arr[w];
+                    }
                 }
             }
         
-            for (int q = 0; q < size - 1; ++q) {
-                buf[q + 1] += buf[q] / base;
+            for (int q = size; q > 0; --q) {
+                buf[q - 1] += buf[q] / base;
                 buf[q] %= base;
             }
 
-            delete [] arr;
-            arr = buf;
+            for (int q = 0; q < size; ++q) {
+                arr[q] = buf[q];
+            } 
+            delete [] buf;
             return *this;
         }
 
@@ -129,9 +163,10 @@ class Decimal {
             uint64_t reminder = 0;
             uint64_t divisible = 0;
             for (std::size_t q = 0; q < size; ++q) {
-                divisible = reminder * static_cast<uint64_t>(base) + static_cast<uint64_t>(arr[q]);
-                arr[q] = divisible / static_cast<uint64_t>(divider);
+                divisible = (reminder * static_cast<uint64_t>(base)) + static_cast<uint64_t>(arr[q]);
+                arr[q] = divisible / static_cast<uint64_t>(divider);// % base;
                 reminder = divisible % static_cast<uint64_t>(divider);
+                // std::cout << arr[q] << " | " << reminder << " | " << divisible << std::endl;
             }
 
             return *this;
@@ -139,11 +174,9 @@ class Decimal {
 
         friend std::ostream& operator<<(std::ostream& out,
                                                     const Decimal& num) {
-            for (std::size_t q = 0; q < num.size; ++q) {
-                if (q == 1) {
-                    out << '.';
-                }
-                out << std::setw(4) << std::setfill('0')
+            out << num.arr[0] << '.';
+            for (std::size_t q = 1; q < num.size; ++q) {
+                out << std::setw(base_len) << std::setfill('0')
                                                     << num.arr[q] << "";
             }
 
@@ -152,6 +185,14 @@ class Decimal {
 
         std::size_t get_size() {
             return size;
+        }
+
+        static uint32_t get_base() {
+            return base;
+        }
+
+        static uint32_t get_base_len() {
+            return base_len;
         }
 };
 
@@ -176,27 +217,52 @@ void test_decimal() {
 }
 
 void calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank) {
-    Decimal accumulator{0, prec};
+    Decimal accumulator{1, prec};
     Decimal devisible{1, prec};
+    // std::cout << rank << "-> " << devisible << std::endl;
 
     for (uint32_t q = start; q < end; ++q) {
         devisible /= q;
-        std::cout << rank << "-> " << devisible << std::endl;
+        // std::cout << rank << "-> " << devisible << std::endl;
         accumulator += devisible;
     }
 
-    std::cout << rank << "-> " << accumulator << std::endl;
-    std::cout << rank << "-> " << accumulator.get_size() << std::endl;
+    // std::cout << rank << "-> " << accumulator << std::endl;
+    std::cout << accumulator << std::endl;
+    // std::cout << rank << "-> " << accumulator.get_size() << std::endl;
 }
 
 double a(std::size_t n) {
     return std::log10(M_2_PI * n) + n * std::log10(n/M_E);
 }
 
+void test_str_to_dec() {
+
+    Decimal dec{"3.141592653589793"};
+    std::cout << dec << "[3.141592653589793]" << std::endl;
+
+    return;
+}
+
+void test_mil_long_long() {
+
+    Decimal dec_a{"3.141592653589793"};
+    Decimal dec_b{"2.718281828459045"};
+    std::cout << dec_a << std::endl;
+    std::cout << dec_b << std::endl;
+    dec_a *= dec_b;
+    std::cout << dec_a << "[8.539734222673566]" << std::endl;
+    std::cout << dec_a << "[8.539734222673565677848730527685]" << std::endl;
+
+    return;
+}
+
 int main(int argc, char** argv) {
     // RET_IF_ERR(MPI_Init(&argc, &argv));
 
     // test_decimal();
+
+    RET_IF_ERR(argc != 2);
 
     // int size, rank;
     int size = 1, rank = 0;
@@ -209,13 +275,14 @@ int main(int argc, char** argv) {
 
     // int N = atoi(argv[1]);
     // RET_IF_ERR(N);
-    int N = 5047;
-    // int N = 461;
-    int prec = 1382/8 + 1;
+    // int N = 5047;
+    int prec = atoi(argv[1]) / Decimal::get_base_len();
+    int N = 3*prec + 1;
     int from = N/size*rank + 1;
     int to = (rank + 1 == size) ? (N) : (from + N/size);
-    std::cout << rank << " -> " << from << "-" << to << std::endl;
-    calc_proc(from, to, prec, rank);
+    // std::cout << rank << " -> " << from << "-" << to << std::endl;
+    // calc_proc(from, to, prec, rank);
+    calc_proc(1, N, prec, rank);
 
     // RET_IF_ERR(MPI_Finalize());
 
