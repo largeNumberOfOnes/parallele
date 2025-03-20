@@ -19,10 +19,10 @@ class Decimal {
     uint32_t *arr;
     std::size_t point = 0;
     bool is_positive = true;
-    // static constexpr uint32_t base = 1'000'000'000;
-    // static constexpr uint32_t base_len = 8;
-    static constexpr uint32_t base = 10'000;
-    static constexpr uint32_t base_len = 4;
+    static constexpr uint32_t base = 1'000'000'000;
+    static constexpr uint32_t base_len = 9;
+    // static constexpr uint32_t base = 10'000;
+    // static constexpr uint32_t base_len = 4;
 
     static constexpr std::size_t comp_size = sizeof(long unsigned int);
 
@@ -92,14 +92,18 @@ class Decimal {
         void operator=(const Decimal&&) = delete;
 
         Decimal& operator+=(Decimal& other) {
-            if (size != other.size) {
-                assert(false);
-                return *this;
-            }
+            // if (size != other.size) {
+            //     assert(false);
+            //     return *this;
+            // }
+            assert(size == other.size);
 
-            bool carry;
-            for (std::size_t q = size - 1;; --q) {
+            uint64_t carry = 0;
+            for (std::size_t q = size - 1; q != -1; --q) {
                 arr[q] += other.arr[q] + carry;
+                // uint64_t tmp = static_cast<uint64_t>(arr[q]) + static_cast<uint64_t>(other.arr[q]) + carry;
+                // arr[q] = tmp % base;
+                // carry = 
                 if (arr[q] >= base) {
                     arr[q] -= base;
                     carry = true;
@@ -137,12 +141,12 @@ class Decimal {
         }
 
         Decimal& operator*=(const Decimal& other) {
-            uint32_t* buf = new uint32_t[size+1];
+            uint64_t* buf = new uint64_t[size+1];
 
             for (int q = 0; q < size; ++q) {
                 for (int w = 0; w < size; ++w) {
                     if (q + w < size+1) {
-                        buf[q + w] += arr[q] * other.arr[w];
+                        buf[q + w] += static_cast<uint64_t>(arr[q]) * static_cast<uint64_t>(other.arr[w]);
                     }
                 }
             }
@@ -170,6 +174,15 @@ class Decimal {
             }
 
             return *this;
+        }
+
+        bool is_null() {
+            for (int q = 0; q < size; ++q) {
+                if (arr[q] != 0) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         friend std::ostream& operator<<(std::ostream& out,
@@ -216,7 +229,7 @@ void test_decimal() {
     // std::cout << dec << "[?]" << std::endl;
 }
 
-void calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank) {
+void calc_part(uint32_t start, uint32_t end, std::size_t prec, int rank) {
     Decimal accumulator{1, prec};
     Decimal devisible{1, prec};
     // std::cout << rank << "-> " << devisible << std::endl;
@@ -225,11 +238,21 @@ void calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank) {
         devisible /= q;
         // std::cout << rank << "-> " << devisible << std::endl;
         accumulator += devisible;
+        if (q % 20 == 0 && devisible.is_null()) {
+            break;
+        }
     }
 
     // std::cout << rank << "-> " << accumulator << std::endl;
+    // std::cout << rank << "-> " << devisible << std::endl;
+    // std::cout << std::endl;
     std::cout << accumulator << std::endl;
     // std::cout << rank << "-> " << accumulator.get_size() << std::endl;
+
+}
+
+void calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank) {
+    calc_part(start, end, prec, rank);
 }
 
 double a(std::size_t n) {
@@ -251,7 +274,7 @@ void test_mil_long_long() {
     std::cout << dec_a << std::endl;
     std::cout << dec_b << std::endl;
     dec_a *= dec_b;
-    std::cout << dec_a << "[8.539734222673566]" << std::endl;
+    // std::cout << dec_a << "[8.539734222673566]" << std::endl;
     std::cout << dec_a << "[8.539734222673565677848730527685]" << std::endl;
 
     return;
@@ -261,6 +284,16 @@ int main(int argc, char** argv) {
     // RET_IF_ERR(MPI_Init(&argc, &argv));
 
     // test_decimal();
+    test_mil_long_long();
+    return 0;
+
+    // uint32_t a = Decimal::get_base();
+    // std::cout << a << std::endl;
+    // std::cout << 2*a << std::endl;
+    // std::cout << 3*a << std::endl;
+    // std::cout << 4*a << std::endl;
+    // std::cout << 5*a << std::endl;
+    // return 0;
 
     RET_IF_ERR(argc != 2);
 
@@ -276,15 +309,20 @@ int main(int argc, char** argv) {
     // int N = atoi(argv[1]);
     // RET_IF_ERR(N);
     // int N = 5047;
-    int prec = atoi(argv[1]) / Decimal::get_base_len();
-    int N = 3*prec + 1;
-    int from = N/size*rank + 1;
-    int to = (rank + 1 == size) ? (N) : (from + N/size);
+    int prec = atoi(argv[1]);
+    int digits = prec / Decimal::get_base_len() + 2;
+    int N = 3*prec + 2;
+    int from = 1 + N/size*rank;
+    int to = (rank + 1 == size) ? (N) : (N/size*(rank+1));
     // std::cout << rank << " -> " << from << "-" << to << std::endl;
     // calc_proc(from, to, prec, rank);
-    calc_proc(1, N, prec, rank);
+    calc_proc(1, N, digits, rank);
 
     // RET_IF_ERR(MPI_Finalize());
 
     return 0;
 }
+
+
+// 1/1! + 1/2! + 1/3! + 1/4! + 1/5! + 1/6! = 
+// 1/1! + 1/2! + 1/3! + 1/4! + 1/5!(1 + 1/6) = 

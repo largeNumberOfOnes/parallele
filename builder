@@ -82,10 +82,8 @@ if __name__ == '__main__':
     parser.add_argument('-nproc', type=int, help='number of processes')
     parser.add_argument('-args', type=str, help='args to the program')
     args = parser.parse_args()
-    # print(args)
     task = search_task_name(args.task)
     binary = 'a.out'
-    # print(task)
     do_dict = {
         'c':   lambda: compile_task(task),
         'r':   lambda: run_task(binary, args.nproc),
