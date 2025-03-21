@@ -32,6 +32,8 @@
 
 # You can select task by printing task_N or by full name.
 
+# Нада учесть выбор компилятора, языка и режима сборки
+
 # План
 #    Написать сборщик
 #    Проверить нулики
@@ -55,15 +57,20 @@ def search_task_name(task: str) -> str:
 #     epilog='Text at the bottom of help'
 # )
 
-def compile_task(task: str) -> None:
+def compile_task(task: str, mpi: bool=False) -> None:
     print('compiling...')
-    # os.system(f'mpicc {task}')
-    os.system(f'g++ {task}')
+    if mpi:
+        # os.system(f'mpicc -g {task}')
+        os.system(f'mpic++ -g {task}')
+    else:
+        os.system(f'g++ -g {task}')
 
-def run_task(binary: str, nproc: int = 1, args: str = '') -> None:
+def run_task(binary: str, nproc: int = 1, args: str = '', mpi: bool=False) -> None:
     print('running...')
-    # os.system(f'mpiexec -n {nproc} ./{binary} {args}')
-    os.system(f'./{binary} {args}')
+    if mpi:
+        os.system(f'mpiexec -n {nproc} ./{binary} {args}')
+    else:
+        os.system(f'./{binary} {args}')
 
 def parse_args():
     pass
@@ -74,7 +81,7 @@ if __name__ == '__main__':
         description='What the program does',
         epilog='Text at the bottom of help'
     )
-    parser.add_argument('mode', choices=('c', 'r', 'car'), help='mode of execution')
+    parser.add_argument('mode', choices=('c', 'r', 'car', 'mcar', 'mr'), help='mode of execution')
     parser.add_argument('task', type=str, help='name of task')
     # subparsers = parser.add_subparsers(title='subcommands',
     #                                description='valid subcommands',
@@ -90,6 +97,13 @@ if __name__ == '__main__':
         'car': lambda: (
                 compile_task(task),
                 run_task(binary, args.nproc, args.args)
+            ),
+        'mcar': lambda: (
+                compile_task(task, mpi=True),
+                run_task(binary, args.nproc, args.args, mpi=True)
+            ),
+        'mr': lambda: (
+                run_task(binary, args.nproc, args.args, mpi=True)
             ),
     }
     do_dict[args.mode]()

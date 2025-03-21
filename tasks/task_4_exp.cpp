@@ -1,15 +1,23 @@
 #include <cctype>
-#include <cmath>
+// #include <cmath>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <assert.h>
+#include <stdint.h>
+#include <thread>
 #include "../slibs/err_proc.h"
+#include "mpi.h"
+// #include "mpi_proto.h"
 // #include "mpich/mpi.h"
 
-
+constexpr int UPPER_SUM_TAG = 1;
+// constexpr int MUL_DEVIS_TAG = 0;
+// constexpr int MUL_ACCUM_TAG = 0;
 
 class Decimal {
     static_assert(sizeof(uint32_t) == 4);
@@ -63,7 +71,7 @@ class Decimal {
                 mult *= 10;
             }
             size = (len - comma_pos - 1) / base_len + 2;
-            std::cout << size << std::endl;
+            // std::cout << size << std::endl;
             arr = new uint32_t[size];
             arr[0] = ved;
 
@@ -92,18 +100,11 @@ class Decimal {
         void operator=(const Decimal&&) = delete;
 
         Decimal& operator+=(Decimal& other) {
-            // if (size != other.size) {
-            //     assert(false);
-            //     return *this;
-            // }
             assert(size == other.size);
 
             uint64_t carry = 0;
             for (std::size_t q = size - 1; q != -1; --q) {
                 arr[q] += other.arr[q] + carry;
-                // uint64_t tmp = static_cast<uint64_t>(arr[q]) + static_cast<uint64_t>(other.arr[q]) + carry;
-                // arr[q] = tmp % base;
-                // carry = 
                 if (arr[q] >= base) {
                     arr[q] -= base;
                     carry = true;
@@ -142,22 +143,25 @@ class Decimal {
 
         Decimal& operator*=(const Decimal& other) {
             uint64_t* buf = new uint64_t[size+1];
+            for (int q = 0; q < size + 1; ++q) {
+                buf[q] = 0;
+            }
 
             for (int q = 0; q < size; ++q) {
                 for (int w = 0; w < size; ++w) {
-                    if (q + w < size+1) {
+                    if (q + w < size + 1) {
                         buf[q + w] += static_cast<uint64_t>(arr[q]) * static_cast<uint64_t>(other.arr[w]);
                     }
                 }
             }
         
             for (int q = size; q > 0; --q) {
-                buf[q - 1] += buf[q] / base;
-                buf[q] %= base;
+                buf[q - 1] += buf[q] / static_cast<uint64_t>(base);
+                buf[q] %= static_cast<uint64_t>(base);
             }
 
             for (int q = 0; q < size; ++q) {
-                arr[q] = buf[q];
+                arr[q] = static_cast<uint32_t>(buf[q]);
             } 
             delete [] buf;
             return *this;
@@ -176,8 +180,29 @@ class Decimal {
             return *this;
         }
 
+        Decimal& divide__(uint32_t divider, int &start) {
+            uint64_t reminder = 0;
+            uint64_t divisible = 0;
+            bool is_prev_z = true;
+            for (std::size_t q = start; q < size; ++q) {
+                divisible = (reminder * static_cast<uint64_t>(base)) + static_cast<uint64_t>(arr[q]);
+                arr[q] = divisible / static_cast<uint64_t>(divider);// % base;
+                reminder = divisible % static_cast<uint64_t>(divider);
+                // std::cout << arr[q] << " | " << reminder << " | " << divisible << std::endl;
+                if (arr[q] == 0) {
+                    if (is_prev_z) {
+                        start = q;
+                    }
+                } else {
+                    is_prev_z = false;
+                }
+            }
+
+            return *this;
+        }
+
         bool is_null() {
-            for (int q = 0; q < size; ++q) {
+            for (int q = size-1; q >= 0 ; --q) {
                 if (arr[q] != 0) {
                     return false;
                 }
@@ -196,8 +221,16 @@ class Decimal {
             return out;
         }
 
-        std::size_t get_size() {
+        [[nodiscard]] uint32_t* get_arr() {
+            return arr;
+        }
+
+        std::size_t get_size() const {
             return size;
+        }
+
+        std::size_t get_type_size() const {
+            return sizeof(arr[0]);
         }
 
         static uint32_t get_base() {
@@ -229,35 +262,107 @@ void test_decimal() {
     // std::cout << dec << "[?]" << std::endl;
 }
 
-void calc_part(uint32_t start, uint32_t end, std::size_t prec, int rank) {
-    Decimal accumulator{1, prec};
-    Decimal devisible{1, prec};
+void calc_part(
+    Decimal& accumulator,
+    Decimal& devisible,
+    uint32_t start,
+    uint32_t end,
+    std::size_t prec,
+    int rank
+) {
+    // std::this_thread::sleep_for(std::chrono::seconds(rank));
     // std::cout << rank << "-> " << devisible << std::endl;
 
     for (uint32_t q = start; q < end; ++q) {
         devisible /= q;
-        // std::cout << rank << "-> " << devisible << std::endl;
         accumulator += devisible;
-        if (q % 20 == 0 && devisible.is_null()) {
-            break;
-        }
+        // std::cout << rank << "-> " << devisible << std::endl;
+        // std::cout << rank << "-> " << accumulator << std::endl;
+        // std::cout << rank << "-> " << q << " " << devisible << " " << accumulator << std::endl;
+        // if (q % 20 == 0 && devisible.is_null()) {
+        // if (devisible.is_null()) {
+            // break;
+        // }
     }
 
     // std::cout << rank << "-> " << accumulator << std::endl;
-    // std::cout << rank << "-> " << devisible << std::endl;
     // std::cout << std::endl;
-    std::cout << accumulator << std::endl;
+    // if (rank == 0) {
+    //     std::cout << rank << " -> devisible: " << devisible << std::endl;
+    //     std::cout << rank << " -> accumulator: " << accumulator << std::endl;
+    // }
     // std::cout << rank << "-> " << accumulator.get_size() << std::endl;
 
 }
 
-void calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank) {
-    calc_part(start, end, prec, rank);
+int calc_N(std::size_t digits) {
+    int N = 2;
+    int start = 0;
+    Decimal devisible{1, digits};
+    while (true) {
+        devisible.divide__(N, start);
+        // std::cout << devisible << std::endl;
+        // std::cout << "N: " << N << std::endl;
+        if (devisible.is_null()) {
+            break;
+        }
+        ++N;
+    }
+    // std::cout << devisible << std::endl;
+    return N;
 }
 
-double a(std::size_t n) {
-    return std::log10(M_2_PI * n) + n * std::log10(n/M_E);
+int calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank, int size) {
+    Decimal accumulator{0, prec};
+    Decimal devisible{1, prec};
+    calc_part(accumulator, devisible, start, end, prec, rank);
+    // std::cout << rank << " -> " << accumulator << std::endl;
+    // Decimal prev_devisible{1, prec};
+    Decimal upper_sum{0, prec};
+
+    std::size_t dec_size = devisible.get_size() * devisible.get_type_size();
+    // std::cout << "dec_size" << dec_size << std::endl;
+
+    if (rank + 1 != size) {
+        RET_IF_ERR(
+            MPI_Recv(
+                upper_sum.get_arr(),
+                dec_size,
+                MPI_CHAR, // MPI_BYTE,
+                rank + 1,
+                UPPER_SUM_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+            )
+        );
+        // std::cout << rank << " -> receive: " << upper_sum << std::endl;
+        upper_sum *= devisible;
+        // std::cout << rank << " -> dev: " << devisible << std::endl;
+        // std::cout << rank << " -> usm: " << upper_sum << std::endl;
+        accumulator += upper_sum;
+    }
+    if (rank != 0) {
+        RET_IF_ERR(
+            MPI_Send(
+                accumulator.get_arr(),
+                dec_size,
+                MPI_CHAR, // MPI_BYTE,
+                rank - 1,
+                UPPER_SUM_TAG, MPI_COMM_WORLD
+            )
+        );
+    } else {
+        accumulator += 1;
+        // std::cout << rank << " -> final: " << accumulator << std::endl;
+        std::ofstream output("ret_e.txt");
+        output << accumulator << std::endl;
+        // std::cout << accumulator << std::endl;
+    }
+
+    return 0;
 }
+
+// double a(std::size_t n) {
+//     return std::log10(M_2_PI * n) + n * std::log10(n/M_E);
+// }
 
 void test_str_to_dec() {
 
@@ -280,49 +385,41 @@ void test_mil_long_long() {
     return;
 }
 
-int main(int argc, char** argv) {
-    // RET_IF_ERR(MPI_Init(&argc, &argv));
-
-    // test_decimal();
+int main2(int argc, char** argv) {
     test_mil_long_long();
     return 0;
+}
 
-    // uint32_t a = Decimal::get_base();
-    // std::cout << a << std::endl;
-    // std::cout << 2*a << std::endl;
-    // std::cout << 3*a << std::endl;
-    // std::cout << 4*a << std::endl;
-    // std::cout << 5*a << std::endl;
-    // return 0;
+int main(int argc, char** argv) {
+    RET_IF_ERR(MPI_Init(&argc, &argv));
 
     RET_IF_ERR(argc != 2);
 
     // int size, rank;
     int size = 1, rank = 0;
-    // RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
-    // RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
+    RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
+    RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
 
-    // printf("Hello world!\n");
-    // printf("size: %d\n", size);
-    // printf("rank: %d\n", rank);
-
-    // int N = atoi(argv[1]);
-    // RET_IF_ERR(N);
-    // int N = 5047;
     int prec = atoi(argv[1]);
     int digits = prec / Decimal::get_base_len() + 2;
-    int N = 3*prec + 2;
+    int N = 0;
+    if (rank == 0) {
+        std::cout << "alg: " << 3*prec + 2 << std::endl;
+        N = calc_N(digits);
+        std::cout << "cal: " << N << std::endl;
+    }
+    // int N = 3*prec + 2;
+    // N = 3*prec + 2;
+    // N = 6;
     int from = 1 + N/size*rank;
-    int to = (rank + 1 == size) ? (N) : (N/size*(rank+1));
+    // int to = (rank + 1 == size) ? (N) : (1 + N/size*(rank+1));
+    int to = (rank + 1 == size) ? (N+1) : (1 + N/size*(rank+1));
     // std::cout << rank << " -> " << from << "-" << to << std::endl;
-    // calc_proc(from, to, prec, rank);
-    calc_proc(1, N, digits, rank);
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
+    calc_proc(from, to, digits, rank, size);
+    // calc_proc(1, N, digits, rank, size);
 
-    // RET_IF_ERR(MPI_Finalize());
+    RET_IF_ERR(MPI_Finalize());
 
     return 0;
 }
-
-
-// 1/1! + 1/2! + 1/3! + 1/4! + 1/5! + 1/6! = 
-// 1/1! + 1/2! + 1/3! + 1/4! + 1/5!(1 + 1/6) = 
