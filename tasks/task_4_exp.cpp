@@ -12,12 +12,8 @@
 #include <thread>
 #include "../slibs/err_proc.h"
 #include "mpi.h"
-// #include "mpi_proto.h"
-// #include "mpich/mpi.h"
 
 constexpr int UPPER_SUM_TAG = 1;
-// constexpr int MUL_DEVIS_TAG = 0;
-// constexpr int MUL_ACCUM_TAG = 0;
 
 class Decimal {
     static_assert(sizeof(uint32_t) == 4);
@@ -27,16 +23,19 @@ class Decimal {
     uint32_t *arr;
     std::size_t point = 0;
     bool is_positive = true;
-    // static constexpr uint32_t base = 1'000'000'000;
-    // static constexpr uint32_t base_len = 9;
-    static constexpr uint32_t base = 10'000;
-    static constexpr uint32_t base_len = 4;
+    static constexpr uint32_t base = 1'000'000'000;
+    static constexpr uint32_t base_len = 9;
+    // static constexpr uint64_t base = 1'000'000'000;
+    // static constexpr uint64_t base_len = 9;
+    // static constexpr uint32_t base = 10'000;
+    // static constexpr uint32_t base_len = 4;
+    // static constexpr uint32_t base = 100'000'000;
+    // static constexpr uint32_t base_len = 8;
 
     static constexpr std::size_t comp_size = sizeof(long unsigned int);
 
     public:
         Decimal(uint32_t a, std::size_t digits, bool is_positive = true)
-            // : size(1 + (digits / 8 + 1) + ((digits % 8 > 5) ? (1) : (0)))
             : size(digits)
             , arr(new uint32_t[size])
             , point(size - 2)
@@ -53,12 +52,7 @@ class Decimal {
         }
 
         Decimal(const char* str) {
-            assert(str);
             std::size_t len = std::strlen(str);
-            // assert(!std::isdigit(str[0]) || str[0] == '-');
-            // for (std::size_t q = 1; q < len; ++q) {
-            //     assert(!std::isdigit(str[q]) || str[0] == '-');
-            // }
 
             is_positive = str[0] == '-';
 
@@ -141,6 +135,33 @@ class Decimal {
             return *this;
         }
 
+        // Decimal& operator*=(const Decimal& other) {
+        //     uint64_t* buf = new uint64_t[size+1];
+        //     for (int q = 0; q < size + 1; ++q) {
+        //         buf[q] = 0;
+        //     }
+
+        //     for (int q = 0; q < size; ++q) {
+        //         for (int w = 0; w < size; ++w) {
+        //             if (q + w < size + 1) {
+        //                 buf[q + w] += static_cast<uint64_t>(arr[q]) * static_cast<uint64_t>(other.arr[w]);
+        //             }
+        //         }
+        //     }
+        
+        //     for (int q = size; q > 0; --q) {
+        //         buf[q - 1] += buf[q] / static_cast<uint64_t>(base);
+        //         buf[q] %= static_cast<uint64_t>(base);
+        //     }
+        //     buf[0] %= static_cast<uint64_t>(base);
+
+        //     for (int q = 0; q < size; ++q) {
+        //         arr[q] = static_cast<uint32_t>(buf[q]);
+        //     } 
+        //     delete [] buf;
+        //     return *this;
+        // }
+
         Decimal& operator*=(const Decimal& other) {
             uint64_t* buf = new uint64_t[size+1];
             for (int q = 0; q < size + 1; ++q) {
@@ -148,17 +169,92 @@ class Decimal {
             }
 
             for (int q = 0; q < size; ++q) {
-                for (int w = 0; w < size; ++w) {
-                    if (q + w < size + 1) {
-                        buf[q + w] += static_cast<uint64_t>(arr[q]) * static_cast<uint64_t>(other.arr[w]);
-                    }
+                assert(arr[q] < base);
+            }
+            for (int q = 0; q < size; ++q) {
+                assert(other.arr[q] < base);
+            }
+
+            // for (int q = 0; q < size; ++q) {
+            //     for (int w = 0; w < size; ++w) {
+            //         if (q + w < size + 1) {
+            //             uint64_t a = static_cast<uint64_t>(arr[q]);
+            //             uint64_t b = static_cast<uint64_t>(other.arr[w]);
+            //             if (q + w == 127) {
+            //                 std::cout << "-- a, b: " << arr[q] << ", " << other.arr[w] << std::endl; 
+            //             }
+            //             uint64_t tmp = buf[q + w];
+            //             buf[q + w] += a * b;
+            //             if (tmp > buf[q + w]) {
+            //                 std::cout << "q: " << q << std::endl; 
+            //                 std::cout << "w: " << w << std::endl; 
+            //                 std::cout << "q+w: " << q+w << std::endl; 
+            //                 std::cout << "a: " << arr[q] << std::endl; 
+            //                 std::cout << "b: " << other.arr[w] << std::endl; 
+            //                 std::cout << "tmp: " << tmp << std::endl; 
+            //                 std::cout << "buf: " << buf[q + w] << std::endl; 
+            //                 assert(false);
+            //             }
+            //         }
+            //         // uint64_t basebase = static_cast<uint64_t>(base)*static_cast<uint64_t>(base);
+            //         // if (buf[q] >= basebase) {
+            //         //     std::cout << basebase << std::endl;
+            //         //     std::cout << arr[q] << std::endl;
+            //         //     std::cout << other.arr[w] << std::endl;
+            //         //     std::cout << buf[q] << std::endl;
+            //         //     assert(false);
+            //         // }
+            //     }
+            // }
+
+            // for (int q = 0; q < size; ++q) {
+            //     for (int w = 0; w < size; ++w) {
+            //         if (q + w < size + 1) {
+            //             uint64_t a = static_cast<uint64_t>(arr[q]);
+            //             uint64_t b = static_cast<uint64_t>(other.arr[w]);
+            //             buf[q + w] += a * b;
+            //             if (buf[q + w] >= base) {
+            //                 for (int e = q + w; e > 0; --e) {
+            //                     buf[e - 1] += buf[e] / base;
+            //                     buf[e] %= base;
+            //                 }
+            //             }
+            //         }
+            //     }
+            // }
+
+            for (int k = size; k > 0; --k) {
+                buf[k-1] += buf[k] / base;
+                buf[k] %= base;
+                for (int q = 1; q <= k; ++q) {
+                    uint64_t a = static_cast<uint64_t>(arr[q]);
+                    uint64_t b = static_cast<uint64_t>(other.arr[k-q]);
+                    buf[k] += a * b;
+                    buf[k-1] += buf[k] / base;
+                    buf[k] %= base;
                 }
             }
         
-            for (int q = size; q > 0; --q) {
-                buf[q - 1] += buf[q] / static_cast<uint64_t>(base);
-                buf[q] %= static_cast<uint64_t>(base);
-            }
+            // for (int k = size; k > 0; --k) {
+            //     for () {
+            //         buf[k] = 
+            //     }
+            // }
+
+            // for (int q = size; q > 0; --q) {
+            //     buf[q - 1] += buf[q] / base;
+            //     buf[q] %= base;
+            // }
+            // for (int w = 0; w < 2; ++w) {
+                // for (int q = 1; q < size; ++q) {
+                //     buf[q - 1] += buf[q] / base;
+                //     buf[q] %= base;
+                // }
+                // for (int q = size; q > 0; --q) {
+                //     buf[q - 1] += buf[q] / base;
+                //     buf[q] %= base;
+                // }
+            // }
             buf[0] %= static_cast<uint64_t>(base);
 
             for (int q = 0; q < size; ++q) {
@@ -173,9 +269,8 @@ class Decimal {
             uint64_t divisible = 0;
             for (std::size_t q = 0; q < size; ++q) {
                 divisible = (reminder * static_cast<uint64_t>(base)) + static_cast<uint64_t>(arr[q]);
-                arr[q] = divisible / static_cast<uint64_t>(divider);// % base;
+                arr[q] = divisible / static_cast<uint64_t>(divider);
                 reminder = divisible % static_cast<uint64_t>(divider);
-                // std::cout << arr[q] << " | " << reminder << " | " << divisible << std::endl;
             }
 
             return *this;
@@ -187,9 +282,8 @@ class Decimal {
             bool is_prev_z = true;
             for (std::size_t q = start; q < size; ++q) {
                 divisible = (reminder * static_cast<uint64_t>(base)) + static_cast<uint64_t>(arr[q]);
-                arr[q] = divisible / static_cast<uint64_t>(divider);// % base;
+                arr[q] = divisible / static_cast<uint64_t>(divider);
                 reminder = divisible % static_cast<uint64_t>(divider);
-                // std::cout << arr[q] << " | " << reminder << " | " << divisible << std::endl;
                 if (arr[q] == 0) {
                     if (is_prev_z) {
                         start = q;
@@ -257,10 +351,6 @@ void test_decimal() {
     dec *= 3;
     std::cout << dec << "[43.0]" << std::endl;
     dec2 /= 3;
-
-    // Decimal dec_a{"3.141592653589793"};
-    // Decimal dec_b{"2.718281828459045"};
-    // std::cout << dec << "[?]" << std::endl;
 }
 
 void calc_part(
@@ -284,6 +374,10 @@ void calc_part(
         // if (devisible.is_null()) {
             // break;
         // }
+
+        if (q % 1000 == 0) {
+            std::cout << (q - start) / (end - start) << "%" << std::endl;
+        }
     }
 
     // std::this_thread::sleep_for(std::chrono::seconds(rank));
@@ -354,7 +448,7 @@ int calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank, int size
             )
         );
     } else {
-        // accumulator += 1;
+        accumulator += 1;
         // std::cout << rank << " -> final: " << accumulator << std::endl;
         std::ofstream output("ret_e.txt");
         output << accumulator << std::endl;
@@ -389,8 +483,27 @@ void test_mil_long_long() {
     return;
 }
 
+void test_mul_again() {
+    for (uint64_t q = 0; q < 1'000'000'000; ++q) {
+        if (q % 100'000'000) {
+            continue;
+        }
+
+        Decimal dec{0, 4};
+        for (int w = 0; w < dec.get_size(); ++w) {
+            dec.get_arr()[w] = q;
+        }
+        std::cout << dec << std::endl;
+        dec *= dec;
+        std::cout << dec << std::endl;
+
+        std::cout << std::endl;
+    }
+
+}
+
 int main2(int argc, char** argv) {
-    test_mil_long_long();
+    test_mul_again();
     return 0;
 }
 
