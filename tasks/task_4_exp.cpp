@@ -27,10 +27,10 @@ class Decimal {
     uint32_t *arr;
     std::size_t point = 0;
     bool is_positive = true;
-    static constexpr uint32_t base = 1'000'000'000;
-    static constexpr uint32_t base_len = 9;
-    // static constexpr uint32_t base = 10'000;
-    // static constexpr uint32_t base_len = 4;
+    // static constexpr uint32_t base = 1'000'000'000;
+    // static constexpr uint32_t base_len = 9;
+    static constexpr uint32_t base = 10'000;
+    static constexpr uint32_t base_len = 4;
 
     static constexpr std::size_t comp_size = sizeof(long unsigned int);
 
@@ -159,6 +159,7 @@ class Decimal {
                 buf[q - 1] += buf[q] / static_cast<uint64_t>(base);
                 buf[q] %= static_cast<uint64_t>(base);
             }
+            buf[0] %= static_cast<uint64_t>(base);
 
             for (int q = 0; q < size; ++q) {
                 arr[q] = static_cast<uint32_t>(buf[q]);
@@ -272,7 +273,7 @@ void calc_part(
 ) {
     // std::this_thread::sleep_for(std::chrono::seconds(rank));
     // std::cout << rank << "-> " << devisible << std::endl;
-
+    // std::cout << rank << " -> " << start << "-" << end << std::endl;
     for (uint32_t q = start; q < end; ++q) {
         devisible /= q;
         accumulator += devisible;
@@ -285,6 +286,7 @@ void calc_part(
         // }
     }
 
+    // std::this_thread::sleep_for(std::chrono::seconds(rank));
     // std::cout << rank << "-> " << accumulator << std::endl;
     // std::cout << std::endl;
     // if (rank == 0) {
@@ -328,29 +330,31 @@ int calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank, int size
             MPI_Recv(
                 upper_sum.get_arr(),
                 dec_size,
-                MPI_CHAR, // MPI_BYTE,
+                MPI_BYTE,
                 rank + 1,
                 UPPER_SUM_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE
             )
         );
         // std::cout << rank << " -> receive: " << upper_sum << std::endl;
         upper_sum *= devisible;
+        // std::cout << rank << " -> upper_sum: " << upper_sum << std::endl;
         // std::cout << rank << " -> dev: " << devisible << std::endl;
         // std::cout << rank << " -> usm: " << upper_sum << std::endl;
         accumulator += upper_sum;
+        // std::cout << rank << " -> accumulator: " << accumulator << std::endl;
     }
     if (rank != 0) {
         RET_IF_ERR(
             MPI_Send(
                 accumulator.get_arr(),
                 dec_size,
-                MPI_CHAR, // MPI_BYTE,
+                MPI_BYTE,
                 rank - 1,
                 UPPER_SUM_TAG, MPI_COMM_WORLD
             )
         );
     } else {
-        accumulator += 1;
+        // accumulator += 1;
         // std::cout << rank << " -> final: " << accumulator << std::endl;
         std::ofstream output("ret_e.txt");
         output << accumulator << std::endl;
@@ -408,14 +412,24 @@ int main(int argc, char** argv) {
         N = calc_N(digits);
         std::cout << "cal: " << N << std::endl;
     }
+    RET_IF_ERR(
+        MPI_Bcast(
+            &N, 1,
+            MPI_INT,  // Тип данных (например, MPI_INT, MPI_DOUBLE)
+            0, MPI_COMM_WORLD
+        )
+    );
+    // std::cout << rank << " -> N: " << N << std::endl;
+    // RET_IF_ERR(false);
     // int N = 3*prec + 2;
     // N = 3*prec + 2;
     // N = 6;
     int from = 1 + N/size*rank;
     // int to = (rank + 1 == size) ? (N) : (1 + N/size*(rank+1));
     int to = (rank + 1 == size) ? (N+1) : (1 + N/size*(rank+1));
+    // std::this_thread::sleep_for(std::chrono::seconds(rank));
     // std::cout << rank << " -> " << from << "-" << to << std::endl;
-    // std::this_thread::sleep_for(std::chrono::seconds(1));
+    // std::this_thread::sleep_for(std::chrono::seconds(2));
     calc_proc(from, to, digits, rank, size);
     // calc_proc(1, N, digits, rank, size);
 
