@@ -1,6 +1,7 @@
 /*
  * This program counts the number e to the nearest N. N is specified by
- *    the first argument of the program. It is mandatory.
+ *    the first argument of the program. It is mandatory. In the result
+ *    this programs creates file ret_e.txt this first N digits of e.
  */
 
 #include <cstring>
