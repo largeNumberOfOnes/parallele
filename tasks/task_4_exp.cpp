@@ -1,17 +1,17 @@
-#include <cctype>
-// #include <cmath>
-#include <chrono>
-#include <cstddef>
-#include <cstdint>
+/*
+ * This program counts the number e to the nearest N. N is specified by
+ *    the first argument of the program. It is mandatory.
+ */
+
 #include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <fstream>
 #include <assert.h>
-#include <stdint.h>
-#include <thread>
 #include "../slibs/err_proc.h"
 #include "mpi.h"
+
+
 
 constexpr int UPPER_SUM_TAG = 1;
 
@@ -21,7 +21,6 @@ class Decimal {
 
     std::size_t size = 0;
     uint32_t *arr;
-    std::size_t point = 0;
     bool is_positive = true;
     static constexpr uint32_t base = 1'000'000'000;
     static constexpr uint32_t base_len = 9;
@@ -30,7 +29,6 @@ class Decimal {
         Decimal(uint32_t a, std::size_t digits, bool is_positive = true)
             : size(digits)
             , arr(new uint32_t[size])
-            , point(size - 2)
             , is_positive(is_positive)
         {
             for (int q = 0; q < size; ++q) {
@@ -45,8 +43,6 @@ class Decimal {
 
         Decimal(const char* str) {
             std::size_t len = std::strlen(str);
-
-            is_positive = str[0] == '-';
 
             int comma_pos = 0;
             uint32_t ved = 0;
@@ -70,10 +66,9 @@ class Decimal {
                     mult = base;
                 }
                 mult /= 10;
-                arr[1 + ((q - comma_pos - 1) / base_len)] += dti(str[q]) * mult;
+                arr[1 + ((q - comma_pos - 1) / base_len)] +=
+                                                        dti(str[q]) * mult;
             }
-
-
         }
 
         ~Decimal() {
@@ -85,7 +80,7 @@ class Decimal {
         void operator=(const Decimal&) = delete;
         void operator=(const Decimal&&) = delete;
 
-        Decimal& operator+=(Decimal& other) {
+        Decimal& operator+=(const Decimal& other) {
             assert(size == other.size);
 
             uint64_t carry = 0;
@@ -157,9 +152,9 @@ class Decimal {
             uint64_t reminder = 0;
             uint64_t divisible = 0;
             for (std::size_t q = 0; q < size; ++q) {
-                divisible = (reminder * static_cast<uint64_t>(base)) + static_cast<uint64_t>(arr[q]);
-                arr[q] = divisible / static_cast<uint64_t>(divider);
-                reminder = divisible % static_cast<uint64_t>(divider);
+                divisible = reminder * base + arr[q];
+                arr[q] = divisible / divider;
+                reminder = divisible % divider;
             }
 
             return *this;
@@ -170,9 +165,9 @@ class Decimal {
             uint64_t divisible = 0;
             bool is_prev_z = true;
             for (std::size_t q = start; q < size; ++q) {
-                divisible = (reminder * static_cast<uint64_t>(base)) + static_cast<uint64_t>(arr[q]);
-                arr[q] = divisible / static_cast<uint64_t>(divider);
-                reminder = divisible % static_cast<uint64_t>(divider);
+                divisible = reminder * base + arr[q];
+                arr[q] = divisible / divider;
+                reminder = divisible % divider;
                 if (arr[q] == 0) {
                     if (is_prev_z) {
                         start = q;
@@ -205,7 +200,7 @@ class Decimal {
             return out;
         }
 
-        [[nodiscard]] uint32_t* get_arr() {
+        uint32_t* get_arr() {
             return arr;
         }
 
@@ -275,7 +270,9 @@ int calc_N(std::size_t digits) {
     return N;
 }
 
-int calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank, int size) {
+int calc_proc(
+    uint32_t start,
+    uint32_t end, std::size_t prec, int rank, int size) {
     Decimal accumulator{0, prec};
     Decimal devisible{1, prec};
     calc_part(accumulator, devisible, start, end, prec, rank);
@@ -310,14 +307,12 @@ int calc_proc(uint32_t start, uint32_t end, std::size_t prec, int rank, int size
         accumulator += 1;
         std::ofstream output("ret_e.txt");
         output << accumulator << std::endl;
-        // std::cout << accumulator << std::endl;
     }
 
     return 0;
 }
 
 void test_str_to_dec() {
-
     Decimal dec{"3.141592653589793"};
     std::cout << dec << "[3.141592653589793]" << std::endl;
 
@@ -325,14 +320,13 @@ void test_str_to_dec() {
 }
 
 void test_mil_long_long() {
-
     Decimal dec_a{"3.141592653589793"};
     Decimal dec_b{"2.718281828459045"};
     std::cout << dec_a << std::endl;
     std::cout << dec_b << std::endl;
     dec_a *= dec_b;
-    // std::cout << dec_a << "[8.539734222673566]" << std::endl;
-    std::cout << dec_a << "[8.539734222673565677848730527685]" << std::endl;
+    std::cout << dec_a
+              << "[8.539734222673565677848730527685]" << std::endl;
 
     return;
 }
@@ -356,15 +350,13 @@ void test_mul_again() {
 
 }
 
-int main2(int argc, char** argv) {
-    test_mul_again();
-    return 0;
-}
-
 int main(int argc, char** argv) {
     RET_IF_ERR(MPI_Init(&argc, &argv));
 
-    RET_IF_ERR(argc != 2);
+    if (argc != 2) {
+        std::cerr << "You should specify count of digits!" << std::endl;
+        RET_IF_ERR(false);
+    }
 
     int size = 1, rank = 0;
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
@@ -372,11 +364,10 @@ int main(int argc, char** argv) {
 
     int prec = atoi(argv[1]);
     int digits = prec / Decimal::get_base_len() + 2;
+
     int N = 0;
     if (rank == 0) {
-        std::cout << "alg: " << 3*prec + 2 << std::endl;
         N = calc_N(digits);
-        std::cout << "cal: " << N << std::endl;
     }
     RET_IF_ERR(
         MPI_Bcast(
@@ -385,6 +376,7 @@ int main(int argc, char** argv) {
             0, MPI_COMM_WORLD
         )
     );
+
     int from = 1 + N/size*rank;
     int to = (rank + 1 == size) ? (N+1) : (1 + N/size*(rank+1));
     calc_proc(from, to, digits, rank, size);
