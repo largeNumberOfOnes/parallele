@@ -23,20 +23,20 @@ double calc(int from, int to) {
 
 int main(int argc, char **argv) {
 
-    if (argc != 2) {
-        printf("Not enougth arguments: you need to specify N - "
-                                                    "summation number.\n");
-        RET_IF_ERR(1);
-    }
-
     RET_IF_ERR(MPI_Init(&argc, &argv));
+
+    check(
+        argc == 2,
+        "Not enougth arguments: you need to specify N - summation number"
+    );
 
     int size, rank;
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
     RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
 
     int N = atoi(argv[1]);
-    RET_IF_ERR(!N);
+    check(N != -1, "N is not an integer!");
+
     int from = N/size*rank;
     int to = (rank + 1 == size) ? (N) : (from + N/size);
     double sum = calc(from, to);

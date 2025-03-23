@@ -17,37 +17,65 @@
 
 #ifdef __cplusplus
     #include <iostream>
-    #define RET_IF_ERR(expr) {                                            \
-        if (expr) {                                                       \
-            std::cout << "\033[91mSome problem: "                         \
-                                << __LINE__ << "\033[39m" << std::endl;   \
+    #include <cstdio>
+#else
+    #include <stdio.h>
+#endif
+
+#define RET_IF_ERR(expr) {                                                \
+    if (expr) {                                                           \
+        printf("\033[91mSome problem: %d\033[39m\n", __LINE__);           \
+        fflush(stdout);                                                   \
+        RET_IF_ERR_EXIT_WAY;                                              \
+    }                                                                     \
+}
+
+#ifdef IT_IS_MPICOMP
+    #define rprint(...) {                                                 \
+        int rank = 0;                                                     \
+        RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));                 \
+        printf("%d -> ", rank);                                           \
+        printf(__VA_ARGS__);                                              \
+        printf("\n");                                                     \
+    }
+#else
+    #define rprint(...) {                                                 \
+        printf("0 -> ");                                                  \
+        printf(__VA_ARGS__);                                              \
+        printf("\n");                                                     \
+    }
+#endif
+
+#ifdef IT_IS_MPICOMP
+    #define check(cond, ...) {                                            \
+        if (!(cond)) {                                                    \
+            int rank = 0;                                                 \
+            RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));             \
+            if (rank == 0) {                                              \
+                fprintf(stderr, "\033[91mError: ");                       \
+                fprintf(stderr, __VA_ARGS__);                             \
+                fprintf(                                                  \
+                    stderr, "\nProblem in line %d: %s\033[39m\n",         \
+                    __LINE__, #cond                                       \
+                );                                                        \
+            }                                                             \
             RET_IF_ERR_EXIT_WAY;                                          \
         }                                                                 \
     }
 #else
-    #include <stdio.h>
-    #define RET_IF_ERR(expr) {                                            \
-        if (expr) {                                                       \
-            printf("\033[91mSome problem: %d\033[39m\n", __LINE__);       \
-            fflush(stdout);                                               \
+    #define check(cond, ...) {                                            \
+        if (!(cond)) {                                                    \
+            fprintf(stderr, "\033[91mError: ");                           \
+            fprintf(stderr, __VA_ARGS__);                                 \
+            fprintf(                                                      \
+                stderr, "\nProblem in line %d: %s\033[39m\n",             \
+                __LINE__, #cond                                           \
+            );                                                            \
             RET_IF_ERR_EXIT_WAY;                                          \
         }                                                                 \
     }
 #endif
 
-// #define PRINT(...) {                                                      \
-//     printf("%d -> ", rank);                                               \
-//     printf(__VA_ARGS__);                                                  \
-//     printf("\n");                                                         \
-// }
-
-// #define PRINT_INT_ARR(arr) {                                              \
-//     printf("%d -> ", rank);                                               \
-//     for (int q = 0; q < (sizeof arr)/(sizeof arr[0]); ++q) {              \
-//         printf("%d ", arr[q]);                                            \
-//     }                                                                     \
-//     printf("\n");                                                         \
-// }
 
 // Destroing internal macro words
 #undef IT_IS_MPICOMP

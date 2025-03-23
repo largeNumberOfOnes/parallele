@@ -22,11 +22,10 @@ int main(int argc, char **argv) {
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
     RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
 
-    if (size < 2) {
-        printf("There is no point in throwing such a celebration "
-                                                        "on your own.\n");
-        RET_IF_ERR(1);
-    }
+    check(
+        size > 1,
+        "There is no point in throwing such a celebration on your own"
+    );
 
     if (rank == 0) {
         int a = 0;

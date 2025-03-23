@@ -354,10 +354,10 @@ void test_mul_again() {
 int main(int argc, char** argv) {
     RET_IF_ERR(MPI_Init(&argc, &argv));
 
-    if (argc != 2) {
-        std::cerr << "You should specify count of digits!" << std::endl;
-        RET_IF_ERR(false);
-    }
+    check(
+        argc == 2,
+        "You should specify count of digits!"
+    );
 
     int size = 1, rank = 0;
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
