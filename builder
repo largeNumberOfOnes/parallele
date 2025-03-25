@@ -42,6 +42,7 @@
 # TODO
 #    Add support for directory-tasks
 
+import subprocess
 import argparse
 import sys
 import os
@@ -158,6 +159,20 @@ def open_vim(args: argparse.Namespace) -> None:
 def open_vscode(args: argparse.Namespace) -> None:
     os.system(f'code -g {Task(args.task).get_path()}:{args.n}')
 
+def run_sbatch():
+    result = subprocess.run(['whoami'], capture_output=True, text=True)
+    if result.stdout != 'rt20250211':
+        print('Error: You cannot run this not from the claster')
+    
+    script_text =                                                         \
+        f"#!/bin/sh"                                                      \
+        f"#SBATCH -n {args.n}"                                            \
+        f"#SBATCH -o ../logs/out_%j.txt"                                  \
+        f"#SBATCH -o ../logs/err_%j.txt"                                  \
+        f"mpiexec -np {args.n} {Task(args.task).get_path()} {args.args}"
+    
+    os.system(f'echo {script_text} ../tmp/sbatch_script.sh')
+
 def parse_args() -> None:
     parser = argparse.ArgumentParser(
         prog='ProgramName',
@@ -255,6 +270,29 @@ def parse_args() -> None:
     subparsers_comp.add_argument('task', type=str, help='Full name of the task or task number')
     subparsers_comp.add_argument('-n', type=int, default=1, help='Number of processes')
     subparsers_comp.set_defaults(func=open_vscode)
+
+    subparsers_comp = subparsers.add_parser(
+        'run_sbatch',
+        help='Open task with vscode'
+    )
+    subparsers_comp.add_argument(
+        'task',
+        type=str,
+        help='Full name of the task or task number'
+    )
+    subparsers_comp.add_argument(
+        '-n',
+        type=str,
+        help='Number of processes'
+    )
+    subparsers_comp.add_argument(
+        '--args',
+        nargs='+',
+        help='Set flags for the compiler'
+    )
+    subparsers_comp.set_defaults(
+        func=run_sbatch
+    )
 
     return parser.parse_args()
 
