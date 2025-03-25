@@ -44,6 +44,7 @@
 
 import subprocess
 import argparse
+import time
 import sys
 import os
 
@@ -161,17 +162,38 @@ def open_vscode(args: argparse.Namespace) -> None:
 
 def run_sbatch(args: argparse.Namespace):
     result = subprocess.run(['whoami'], capture_output=True, text=True)
-    if result.stdout != 'rt20250211':
+    if result.stdout != 'rt20250211\n':
         print('Error: You cannot run this not from the claster')
+        return
     
+    args_tx = args.args if args.args is not None else ''
     script_text =                                                         \
-        f"#!/bin/sh"                                                      \
-        f"#SBATCH -n {args.n}"                                            \
-        f"#SBATCH -o ../logs/out_%j.txt"                                  \
-        f"#SBATCH -o ../logs/err_%j.txt"                                  \
-        f"mpiexec -np {args.n} {Task(args.task).get_path()} {args.args}"
+        f"#!/bin/sh\n"                                                    \
+        f"#SBATCH -n {args.n}\n"                                          \
+        f"#SBATCH -o ../logs/out_%j.txt\n"                                \
+        f"#SBATCH -e ../logs/err_%j.txt\n"                                \
+        f"mpiexec -np {args.n} {Task(args.task).get_exec_path()} {args_tx}"
     
-    os.system(f'echo {script_text} ../tmp/sbatch_script.sh')
+    os.system(f'echo "{script_text}" > ../tmp/sbatch_script.sh')
+    os.system(f'cat ../tmp/sbatch_script.sh')
+    result = subprocess.run(
+        ['sbatch', '../tmp/sbatch_script.sh'],
+        capture_output=True,
+        text=True
+    )
+    out_num = result.stdout[20:-1]
+    print(result.stdout)
+    mult = 0.25
+    while f'out_{out_num}.txt' not in os.listdir('../logs/'):
+        print(f'waiting {mult}s')
+        time.sleep(mult)
+        mult *= 2
+        if mult > 30:
+            print("Error: waiting time exceeded")
+            return
+
+    print('Program output:')
+    os.system(f'cat ../logs/out_{out_num}.txt')
 
 def parse_args() -> None:
     parser = argparse.ArgumentParser(
