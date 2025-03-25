@@ -112,6 +112,7 @@ def mpi_compile_task(args: argparse.Namespace) -> None:
     comp = ''
     inp_name = ''
     out_name = ''
+    # flags = args.flags
 
     task = Task(args['task'])
     inp_name = task.get_path()
@@ -200,6 +201,11 @@ def parse_args() -> None:
         'task',
         type=str,
         help='Full name of the task or task number'
+    )
+    subparsers_comp.add_argument(
+        '--flags',
+        nargs='+',
+        help='Set flags for the compiler'
     )
     subparsers_comp.set_defaults(
         func=mpi_compile_task

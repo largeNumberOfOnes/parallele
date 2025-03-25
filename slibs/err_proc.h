@@ -32,7 +32,7 @@
 
 #ifdef IT_IS_MPICOMP
     #define rprint(...) {                                                 \
-        int rank = 0;                                                     \
+        int rank = 7;                                                     \
         RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));                 \
         printf("%d -> ", rank);                                           \
         printf(__VA_ARGS__);                                              \
@@ -76,6 +76,7 @@
     }
 #endif
 
+#define DOT printf("\033[95mDOT from line: %d\033[39m\n", __LINE__);
 
 // Destroing internal macro words
 #undef IT_IS_MPICOMP

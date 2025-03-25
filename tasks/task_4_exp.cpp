@@ -9,8 +9,8 @@
 #include <iostream>
 #include <fstream>
 #include <assert.h>
-#include "../slibs/err_proc.h"
 #include "mpi.h"
+#include "../slibs/err_proc.h"
 
 
 
@@ -250,9 +250,6 @@ void calc_part(
     for (uint32_t q = start; q < end; ++q) {
         devisible.divide__(q, st);
         accumulator += devisible;
-        if (q % ((end-start)/100) == 0 && devisible.is_null()) {
-            break;
-        }
     }
 
 }
@@ -272,15 +269,17 @@ int calc_N(std::size_t digits) {
 }
 
 int calc_proc(
-    uint32_t start,
-    uint32_t end, std::size_t prec, int rank, int size) {
+    uint32_t start, uint32_t end,
+    std::size_t prec,
+    int rank, int size
+) {
     Decimal accumulator{0, prec};
     Decimal devisible{1, prec};
     calc_part(accumulator, devisible, start, end, prec, rank);
     Decimal upper_sum{0, prec};
-
-    std::size_t dec_size = devisible.get_size() * devisible.get_type_size();
-
+    std::size_t dec_size = devisible.get_size() *
+                                                devisible.get_type_size();
+    
     if (rank + 1 != size) {
         RET_IF_ERR(
             MPI_Recv(
@@ -377,10 +376,21 @@ int main(int argc, char** argv) {
             0, MPI_COMM_WORLD
         )
     );
+    clock_t start, end;
+    if (rank == 0) {
+        start = clock();
+    }
 
     int from = 1 + N/size*rank;
     int to = (rank + 1 == size) ? (N+1) : (1 + N/size*(rank+1));
+
     calc_proc(from, to, digits, rank, size);
+
+    if (rank == 0) {
+        end = clock();
+        double delta_time = ((double)(end - start)) / CLOCKS_PER_SEC;
+        rprint("time: %f", delta_time);
+    }
 
     RET_IF_ERR(MPI_Finalize());
 
