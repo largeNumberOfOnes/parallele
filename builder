@@ -165,23 +165,45 @@ def parse_args() -> None:
     )
     subparsers = parser.add_subparsers(title='commands')
 
+
     subparsers_comp = subparsers.add_parser(
         'compile',
         aliases=['c', 'comp'],
         help='Compile task using gcc compiler'
     )
-    subparsers_comp.add_argument('task', type=str, help='Full name of the task or task number')
-    subparsers_comp.add_argument('--no_presets', action='store_true', help='Do not use preset flags')
-    subparsers_comp.add_argument('--flags', nargs='+', help='Set flags for the compiler')
-    subparsers_comp.set_defaults(func=compile_task)
+    subparsers_comp.add_argument(
+        'task',
+        type=str,
+        help='Full name of the task or task number'
+    )
+    subparsers_comp.add_argument(
+        '--no_presets',
+        action='store_true',
+        help='Do not use preset flags'
+    )
+    subparsers_comp.add_argument(
+        '--flags',
+        nargs='+',
+        help='Set flags for the compiler'
+    )
+    subparsers_comp.set_defaults(
+        func=compile_task
+    )
+
 
     subparsers_comp = subparsers.add_parser(
         'mpi_compile',
         aliases=['mc', 'mcomp'],
         help='Compile task using mpi compiler'
     )
-    subparsers_comp.add_argument('task', type=str, help='Full name of the task or task number')
-    subparsers_comp.set_defaults(func=mpi_compile_task)
+    subparsers_comp.add_argument(
+        'task',
+        type=str,
+        help='Full name of the task or task number'
+    )
+    subparsers_comp.set_defaults(
+        func=mpi_compile_task
+    )
 
     subparsers_comp = subparsers.add_parser(
         'run',
