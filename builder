@@ -159,7 +159,7 @@ def open_vim(args: argparse.Namespace) -> None:
 def open_vscode(args: argparse.Namespace) -> None:
     os.system(f'code -g {Task(args.task).get_path()}:{args.n}')
 
-def run_sbatch():
+def run_sbatch(args: argparse.Namespace):
     result = subprocess.run(['whoami'], capture_output=True, text=True)
     if result.stdout != 'rt20250211':
         print('Error: You cannot run this not from the claster')
