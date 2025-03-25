@@ -306,7 +306,7 @@ int calc_proc(
         );
     } else {
         accumulator += 1;
-        std::ofstream output("ret_e.txt");
+        std::ofstream output("output/ret_e.txt");
         output << accumulator << std::endl;
     }
 
