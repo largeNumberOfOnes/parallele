@@ -166,7 +166,7 @@ def run_sbatch(args: argparse.Namespace):
         print('Error: You cannot run this not from the claster')
         return
     
-    args_tx = args.args if args.args is not None else ''
+    args_tx = ' '.join(args.args) if args.args is not None else ''
     script_text =                                                         \
         f"#!/bin/sh\n"                                                    \
         f"#SBATCH -n {args.n}\n"                                          \
@@ -184,13 +184,18 @@ def run_sbatch(args: argparse.Namespace):
     out_num = result.stdout[20:-1]
     print(result.stdout)
     mult = 0.25
-    while f'out_{out_num}.txt' not in os.listdir('../logs/'):
-        print(f'waiting {mult}s')
-        time.sleep(mult)
+    # while os.system(f'squeue -j {out_num} > /dev/null') == 0:
+    while subprocess.run(
+        ['squeue', '-j', out_num],
+        capture_output=True,
+        text=True
+    ).stdout.count('\n') != 1:
         mult *= 2
-        if mult > 30:
+        if mult > args.wt:
             print("Error: waiting time exceeded")
             return
+        print(f'waiting {mult}s')
+        time.sleep(mult)
 
     print('Program output:')
     os.system(f'cat ../logs/out_{out_num}.txt')
@@ -306,6 +311,12 @@ def parse_args() -> None:
         '-n',
         type=str,
         help='Number of processes'
+    )
+    subparsers_comp.add_argument(
+        '-wt',
+        type=int,
+        default=20,
+        help='Set waiting time'
     )
     subparsers_comp.add_argument(
         '--args',
