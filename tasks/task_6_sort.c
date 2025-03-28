@@ -197,7 +197,6 @@ void no_sample_sort(int **arr, int *n, MPI_Comm comm) {
     }
     MPI_Bcast(splitters, size - 1, MPI_INT, 0, comm);
 
-    // 4. Распределение элементов по процессам
     int *send_counts = (int *)calloc(size, sizeof(int));
     int *recv_counts = (int *)calloc(size, sizeof(int));
     for (int i = 0; i < *n; i++) {
@@ -209,10 +208,8 @@ void no_sample_sort(int **arr, int *n, MPI_Comm comm) {
         send_counts[dest]++;
     }
 
-    // 5. Обмен размерами данных между процессами
     MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, comm);
 
-    // 6. Подготовка к пересылке данных
     int total_recv = 0;
     for (int i = 0; i < size; i++) {
         total_recv += recv_counts[i];
@@ -227,17 +224,16 @@ void no_sample_sort(int **arr, int *n, MPI_Comm comm) {
         recv_displs[i] = recv_displs[i - 1] + recv_counts[i - 1];
     }
 
-    // 7. Обмен данными (MPI_Alltoallv)
     MPI_Alltoallv(*arr, send_counts, send_displs, MPI_INT,
                   recv_buf, recv_counts, recv_displs, MPI_INT, comm);
 
-    // 8. Освобождение старого массива и замена на новый
     free(*arr);
     *arr = recv_buf;
     *n = total_recv;
 
     // 9. Финальная локальная сортировка
     // insertion_sort(*arr, *n);
+    quicksort(arr, 0, count - 1);
 
     free(splitters);
     free(send_counts);
