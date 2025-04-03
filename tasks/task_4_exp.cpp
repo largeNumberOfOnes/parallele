@@ -2,6 +2,9 @@
  * This program counts the number e to the nearest N. N is specified by
  *    the first argument of the program. It is mandatory. In the result
  *    this programs creates file ret_e.txt this first N digits of e.
+ *    Second arument of program is optinal. If this one is "apr" the
+ *    program will use aproximation (digits = 3*N + 1) else digits count
+ *    will be calulated before the program start.
  */
 
 #include <cstring>
@@ -21,17 +24,16 @@ class Decimal {
     static_assert(sizeof(uint32_t) == 4);
     static_assert(sizeof(uint64_t) == 8);
 
-    std::size_t size = 0;
-    uint32_t *arr;
-    bool is_positive = true;
     static constexpr uint32_t base = 1'000'000'000;
     static constexpr uint32_t base_len = 9;
 
+    std::size_t size = 0;
+    uint32_t *arr = nullptr;
+
     public:
-        Decimal(uint32_t a, std::size_t digits, bool is_positive = true)
+        Decimal(uint32_t a, std::size_t digits)
             : size(digits)
             , arr(new uint32_t[size])
-            , is_positive(is_positive)
         {
             for (int q = 0; q < size; ++q) {
                 arr[q] = 0;
@@ -39,7 +41,7 @@ class Decimal {
             arr[0] = a;
         }
 
-        int dti(char digit) {
+        static int dti(char digit) {
             return digit - '0';
         }
 
@@ -63,13 +65,13 @@ class Decimal {
                 arr[q] = 0;
             }
 
-            for (int q = comma_pos+1; q < len; ++q) {
+            for (int q = comma_pos + 1; q < len; ++q) {
                 if ((q - comma_pos - 1) % base_len == 0) {
                     mult = base;
                 }
                 mult /= 10;
                 arr[1 + ((q - comma_pos - 1) / base_len)] +=
-                                                        dti(str[q]) * mult;
+                                                dti(str[q]) * mult;
             }
         }
 
@@ -162,7 +164,7 @@ class Decimal {
             return *this;
         }
 
-        Decimal& divide__(uint32_t divider, int &start) {
+        Decimal& divide__(uint32_t divider, int& start) {
             uint64_t reminder = 0;
             uint64_t divisible = 0;
             bool is_prev_z = true;
@@ -223,22 +225,6 @@ class Decimal {
         }
 };
 
-void test_decimal() {
-    Decimal dec{1, 14, true};
-    Decimal dec2{9, 14, true};
-
-    std::cout << dec << "[1]" << std::endl;
-    dec /= 3;
-    std::cout << dec << "[0.(3)]" << std::endl;
-    dec += 5;
-    std::cout << dec << "[5.(3)]" << std::endl;
-    dec += dec2;
-    std::cout << dec << "[14.(3)]" << std::endl;
-    dec *= 3;
-    std::cout << dec << "[43.0]" << std::endl;
-    dec2 /= 3;
-}
-
 void calc_part(
     Decimal& accumulator,
     Decimal& devisible,
@@ -252,10 +238,9 @@ void calc_part(
         devisible.divide__(q, st);
         accumulator += devisible;
     }
-
 }
 
-int calc_N(std::size_t digits) {
+int calc_N_b_stepping(std::size_t digits) {
     int N = 2;
     int start = 0;
     Decimal devisible{1, digits};
@@ -313,6 +298,22 @@ int calc_proc(
     return 0;
 }
 
+void test_decimal() {
+    Decimal dec{1, 14};
+    Decimal dec2{9, 14};
+
+    std::cout << dec << "[1]" << std::endl;
+    dec /= 3;
+    std::cout << dec << "[0.(3)]" << std::endl;
+    dec += 5;
+    std::cout << dec << "[5.(3)]" << std::endl;
+    dec += dec2;
+    std::cout << dec << "[14.(3)]" << std::endl;
+    dec *= 3;
+    std::cout << dec << "[43.0]" << std::endl;
+    dec2 /= 3;
+}
+
 void test_str_to_dec() {
     Decimal dec{"3.141592653589793"};
     std::cout << dec << "[3.141592653589793]" << std::endl;
@@ -351,11 +352,31 @@ void test_mul_again() {
 
 }
 
+int calc_N(int rank, int digits, int argc, char** argv) {
+    int N = 0;
+    if (argc >= 3 && std::strcmp(argv[2], "apr")) {
+        N = 3*digits + 1;
+    } else {
+        if (rank == 0) {
+            N = calc_N_b_stepping(digits);
+        }
+        RET_IF_ERR(
+            MPI_Bcast(
+                &N, 1,
+                MPI_INT,
+                0, MPI_COMM_WORLD
+            )
+        );
+    }
+
+    return N;
+}
+
 int main(int argc, char** argv) {
     RET_IF_ERR(MPI_Init(&argc, &argv));
 
     check(
-        argc == 2,
+        argc > 2,
         "You should specify count of digits!"
     );
 
@@ -366,17 +387,8 @@ int main(int argc, char** argv) {
     int prec = atoi(argv[1]);
     int digits = prec / Decimal::get_base_len() + 2;
 
-    int N = 0;
-    if (rank == 0) {
-        N = calc_N(digits);
-    }
-    RET_IF_ERR(
-        MPI_Bcast(
-            &N, 1,
-            MPI_INT,
-            0, MPI_COMM_WORLD
-        )
-    );
+    int N = calc_N(rank, digits, argc, argv);
+    
     clock_t start, end;
     if (rank == 0) {
         start = clock();
@@ -389,8 +401,9 @@ int main(int argc, char** argv) {
 
     if (rank == 0) {
         end = clock();
-        double delta_time = ((double)(end - start)) / CLOCKS_PER_SEC;
-        rprint("time: %f", delta_time);
+        double delta_time = (static_cast<double>(end - start))
+                                                        / CLOCKS_PER_SEC;
+        std::cout << "time: " << delta_time << std::endl;
     }
 
     RET_IF_ERR(MPI_Finalize());
