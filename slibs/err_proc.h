@@ -123,5 +123,8 @@ static inline void rprint_arr(int *arr, int count) {
     free(str);
 }
 
+#define DOT printf("\033[95mDOT from line: %d\033[39m\n", __LINE__);
+#define DOTR printf("\033[95mDOT %d from line: %d\033[39m\n", rank, __LINE__);
+
 // Destroing internal macro words
 #undef IT_IS_MPICOMP

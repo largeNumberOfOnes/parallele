@@ -391,7 +391,7 @@ static void swap_buckets(
     *buckets = new_backets;
 }
 
-static void merge(
+static inline void merge(
     int *dst,
     int *src1,
     int count1,
@@ -408,7 +408,7 @@ static void merge(
             dst[pointer++] = src2[pointer2++];
         }
     }
-    if (pointer1 == count1) {
+    if (pointer1 == count1) { // DEV [Replace with memcpy!]
         while (pointer2 < count2) {
             dst[pointer++] = src2[pointer2++];
         }
@@ -456,7 +456,8 @@ static inline int find_backet_with_min_elem(
 }
 
 static void merge_backets(
-    int **buf,
+    int *buf,
+    int *help_buf,
     int buf_size,
     int backets_count,
     int *count_arr,
@@ -468,38 +469,105 @@ static void merge_backets(
         new_buf_size += count_arr[q];
     }
 
-    int *new_buf = (int*) malloc(buf_size * sizeof(int));
     const int **pointers = (const int**) malloc(buf_size * sizeof(int*));
     for (int q = 0; q < backets_count; ++q) {
-        pointers[q] = *buf + q*backet_size;
+        pointers[q] = buf + q*backet_size;
     }
     for (int buf_pointer = 0; buf_pointer < new_buf_size; ++buf_pointer) {
         int min = find_backet_with_min_elem(
             backet_size, backets_count, pointers, count_arr
         );        
-        new_buf[buf_pointer] = *pointers[min];
+        help_buf[buf_pointer] = *pointers[min];
         count_arr[min] -= 1;
         pointers[min] += 1;
     }
 
-    free(*buf);
-    *buf = new_buf;
     *new_count = new_buf_size;
 }
 
+static inline int is_receiver(int rank, int size, int q) {
+    return rank % (2*q) == 0 && rank + q < size;
+}
+
+static inline int is_sender(int rank, int size, int q) {
+    return rank % (2*q) != 0 && 0 < rank;
+}
+
+static inline int calc_sender_rank(int rank, int size, int q) {
+    return rank + q;
+}
+
+static inline int calc_receiver_rank(int rank, int size, int q) {
+    return rank - q;
+}
+
+static inline void swap_pointers(int **a, int **b) {
+    int *t = *b;
+    *b = *a;
+    *a = t;
+}
+
+static inline void update_counts(int *counts_arr, int count, int q) {
+    for (int w = 0; w < count; w += 2*q) {
+        counts_arr[w]     += counts_arr[w + q];
+        counts_arr[w + q] =  0;
+    }
+}
+
 static void gather_backets(
-    int *buf,
+    int *buf_arr, // len = arr size
+    int *buf_recv, // len = arr size
+    int *buf_merge, // len = arr size
+    int *counts_arr, // len = proc count // For elems_counts
+    int elements_count,
     int buf_size,
     int rank,
-    int size
+    int size,
+    int *ret_arr
 ) {
     
-    for (int q = 0; q < ; ++q) {
-        if (rank % 2 == 0 && rank + 1 != size) {
-            // recv
-        } else {
-            // send
+    RET_IF_ERR(
+        MPI_Allgather(
+            &elements_count, 1, MPI_INT, 
+            counts_arr, 1, MPI_INT, 
+            MPI_COMM_WORLD
+        )
+    );
+    // int self_count = counts_arr[rank];
+
+    const int TAG = 0;
+    for (int q = 1; q < size; q *= 2) {
+        if (is_receiver(rank, size, q)) {
+            int sender_rank = calc_sender_rank(rank, size, q);
+            int recv_count = counts_arr[sender_rank];
+            RET_IF_ERR(
+                MPI_Recv(
+                    buf_recv, recv_count, MPI_INT,
+                    sender_rank, TAG,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE
+                )
+            );
+            merge(
+                buf_merge,
+                buf_arr, counts_arr[rank],
+                buf_recv, counts_arr[sender_rank]
+            );
+            swap_pointers(&buf_merge, &buf_arr);
+            update_counts(counts_arr, size, q);
+        } else if (is_sender(rank, size, q)) {
+            int receiver_rank = calc_receiver_rank(rank, size, q);
+            RET_IF_ERR(
+                MPI_Send(
+                    buf_arr, counts_arr[rank], MPI_INT, 
+                    receiver_rank, TAG, MPI_COMM_WORLD
+                )
+            );
+            return;
         }
+    }
+    if (rank == main_rank) {
+        memcpy(ret_arr, buf_arr, buf_size*sizeof(int));
+        return;
     }
 }
 
@@ -536,12 +604,22 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
     swap_buckets(&self_arr, size, self_count, &count_arr);
     
     int new_count = 0;
-    merge_backets(&self_arr, count, size, count_arr, &new_count);
+    int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
+    int *new_buf2 = new_buf1 + count;
+    merge_backets(self_arr, new_buf1, count, size, count_arr, &new_count);
 
-    // rprint_arr(self_arr, new_count);
+    // rprint_arr(new_buf1, new_count);
 
-    gather_backets();
+    gather_backets(
+        new_buf1, new_buf2, self_arr, count_arr,
+        new_count, count,
+        rank, size,
+        arr
+    );
 
+    free(self_arr);
+    free(count_arr);
+    free(new_buf1);
 
     return 0;
 }
@@ -575,20 +653,20 @@ int main(int argc, char **argv) {
     )
 
     // test_calc_layers();
-    int arr[] = {
-        20,  8, 14,  7, 26, 12,  6,  2, 10,
-        19,  1, 23, 18, 25, 17, 13, 15,  4,
-        9 ,  3, 21, 24,  5, 22, 16, 11, 27,
-    };
-    int count = sizeof(arr)/sizeof(arr[0]);
+    // int arr[] = {
+    //     20,  8, 14,  7, 26, 12,  6,  2, 10,
+    //     19,  1, 23, 18, 25, 17, 13, 15,  4,
+    //     9 ,  3, 21, 24,  5, 22, 16, 11, 27,
+    // };
+    // int count = sizeof(arr)/sizeof(arr[0]);
     // heap_sort(arr, count);
 
-    // int count = size*15;
-    // srand(7);
-    // int *arr = NULL;
-    // if (rank == main_rank) {
-    //     generate_random_array(count, 1000);
-    // }
+    int count = size*15;
+    srand(7);
+    int *arr = NULL;
+    if (rank == main_rank) {
+        arr = generate_random_array(count, 1000);
+    }
 
     // if (rank != main_rank) {
     //     arr = NULL;
@@ -598,9 +676,9 @@ int main(int argc, char **argv) {
     //     print_arr(arr, count);
     // }
     sample_sort(arr, count, rank, size);
-    // if (rank == main_rank) {
-    //     print_arr(arr, count);
-    // }
+    if (rank == main_rank) {
+        print_arr(arr, count);
+    }
     // if (rank != main_rank) {
     //     return 0;
     // }
