@@ -6,6 +6,10 @@
 
 
 
+// ------------------------------------------------------- Global variables
+
+const int main_rank = 0;
+
 // ------------------------------------ Nice things for working with arrays
 
 void print_arr(int *arr, int count) {
@@ -115,17 +119,14 @@ void quicksort(int *arr, int l, int r) {
 
 // ------------------------------------------------------------ sample_sort
 
-const int main_rank = 0;
-
 static void calc_splitters(
     int *self_arr,
+    int *splitters,
     int count,
     int rank,
-    int size,
-    int **ret_splitters
+    int size
 ) {
     int splitters_count = size;
-    int *splitters = (int*) malloc(splitters_count * sizeof(int));
     for (int q = 0; q < size; ++q) {
         splitters[q] = self_arr[q*count/size];
     }
@@ -135,6 +136,7 @@ static void calc_splitters(
     if (rank == main_rank) {
         all_splitters = (int*) malloc(all_splitters_count*sizeof(int));
     }
+
     RET_IF_ERR(
         MPI_Gather(
             splitters, splitters_count, MPI_INT, 
@@ -158,8 +160,6 @@ static void calc_splitters(
             main_rank, MPI_COMM_WORLD
         )
     );
-
-    *ret_splitters = splitters;
 }
 
 static void separate_elements(
@@ -193,7 +193,7 @@ static void separate_elements(
     count_arr[backets_count - 1] = backet_position;
 }
 
-void test_separate_elements() {
+static void test_separate_elements() {
 
     int arr[64] = {
         3, 10, 18, 30, 31, 33, 40, 49, 51, 64, 66, 69, 70, 77, 79, 91
@@ -223,8 +223,6 @@ void test_separate_elements() {
     check(count_arr[1] == 5);
     check(count_arr[2] == 4);
     check(count_arr[3] == 3);
-    
-
 }
 
 static void swap_backets(
@@ -285,15 +283,6 @@ static inline void merge(
             (count1 - pointer1) * sizeof(int)
         );
     }
-}
-
-inline int get_elem(
-    const int *buf,
-    int backet_size,
-    int backet,
-    int element
-) {
-    return buf[backet*backet_size + element];
 }
 
 static inline int find_backet_with_min_elem(
@@ -442,6 +431,14 @@ static void gather_backets(
     }
 }
 
+static void separate_on_backets() {
+
+}
+
+static void merge_into_arr() {
+
+}
+
 void samplesort_alg(int *arr, int count, int rank, int size) {
     int self_count = count / size;
     int *self_arr = (int*) malloc(count * sizeof(int));
@@ -457,11 +454,8 @@ void samplesort_alg(int *arr, int count, int rank, int size) {
     quicksort(self_arr, 0, self_count-1);
 
     int splitters_count = size;
-    int *splitters = NULL;
-    calc_splitters(
-        self_arr, self_count, rank, size,
-        &splitters
-    );
+    int *splitters = (int*) malloc(splitters_count * sizeof(int));
+    calc_splitters(self_arr, splitters, self_count, rank, size);
 
     int *count_arr = (int*) malloc(size * sizeof(int));
     separate_elements(
@@ -471,6 +465,7 @@ void samplesort_alg(int *arr, int count, int rank, int size) {
         count_arr,
         splitters
     );
+    free(splitters);
 
     int new_count = 0;
     int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
@@ -485,10 +480,9 @@ void samplesort_alg(int *arr, int count, int rank, int size) {
         rank, size,
         arr
     );
-    free(splitters);
+
     free(self_arr);
-    // MPI_Barrier(MPI_COMM_WORLD);
-    // free(count_arr);
+    free(count_arr);
     free(new_buf1);
 }
 
@@ -546,9 +540,6 @@ void get_arr_for_testing_samplesort(int **ret_arr, int *ret_count) {
 int main(int argc, char **argv) {
     RET_IF_ERR(MPI_Init(&argc, &argv));
 
-    // test_separate_elements();
-    // return 0;
-
     int rank, size;
     RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
@@ -556,7 +547,7 @@ int main(int argc, char **argv) {
     check_ames(
         size > 1,
         "You should specify more than 1 proc for this program!"
-    )
+    );
 
     int count = size*15;
     int *arr = NULL;
@@ -564,27 +555,14 @@ int main(int argc, char **argv) {
         arr = generate_random_array(count, 1000, 7);
         print_arr(arr, count);
     }
-
-    // if (rank != main_rank) {
-    //     arr = NULL;
-    // }
-
-    // if (rank == main_rank) {
-    //     print_arr(arr, count);
-    // }
     
     samplesort(arr, count, rank, size);
     // if (rank == main_rank) { heapsort(arr, count); }
+    // if (rank == main_rank) { quicksort(arr, 0, count - 1); }
 
     if (rank == main_rank) {
-        print_arr(arr, count);
-    }
-    
-    if (rank == main_rank) {
+        // print_arr(arr, count);
         printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
-    }
-
-    if (rank == main_rank) {
         free(arr);
     }
 
