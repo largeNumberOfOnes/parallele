@@ -361,14 +361,14 @@ void test_separate_elements() {
 
 }
 
-static void swap_buckets(
+static void swap_backets(
     int **buckets,
-    int buckets_count,
-    int buckets_size,
+    int backets_count,
+    int backets_size,
     int **count_arr
 ) {
 
-    int *new_count_arr = (int*) malloc(buckets_count * sizeof(int));
+    int *new_count_arr = (int*) malloc(backets_count * sizeof(int));
     RET_IF_ERR(
         MPI_Alltoall(
             *count_arr, 1, MPI_INT,
@@ -378,13 +378,15 @@ static void swap_buckets(
     );
     free(*count_arr);
     *count_arr = new_count_arr;
+    // memcpy(count_arr, new_count_arr, backets_count);
+    // free(new_count_arr);
 
-    int *new_backets = (int*) malloc(buckets_count * buckets_size *
+    int *new_backets = (int*) malloc(backets_count * backets_size *
                                                             sizeof(int));
     RET_IF_ERR(
         MPI_Alltoall(
-            *buckets, buckets_size, MPI_INT,
-            new_backets, buckets_size, MPI_INT,
+            *buckets, backets_size, MPI_INT,
+            new_backets, backets_size, MPI_INT,
             MPI_COMM_WORLD
         )
     );
@@ -587,18 +589,12 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
 
     quicksort(self_arr, 0, self_count-1);
 
-rprint_arr(self_arr, self_count);
-// rprint("correct: %s\n", check_arr(self_arr, self_count) ? "true" : "false");
-
     int splitters_count = size;
     int *splitters = NULL;
     calc_splitters(
         self_arr, self_count, rank, size,
         &splitters
     );
-
-rprint("splitters:");
-rprint_arr(splitters, splitters_count-1);
 
     int *count_arr = (int*) malloc(size * sizeof(int));
     separate_elements(
@@ -609,19 +605,12 @@ rprint_arr(splitters, splitters_count-1);
         splitters
     );
 
-rprint("");
-rprint("backets:");
-rprint_arr(self_arr, count);
-rprint_arr(count_arr, size);
+    swap_backets(&self_arr, size, self_count, &count_arr);
 
-    swap_buckets(&self_arr, size, self_count, &count_arr);
-DOT
     int new_count = 0;
     int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
     int *new_buf2 = new_buf1 + count;
     merge_backets(self_arr, new_buf1, count, size, count_arr, &new_count);
-DOT
-    rprint_arr(new_buf1, new_count);
 
     gather_backets(
         new_buf1, new_buf2, self_arr, count_arr,
@@ -629,21 +618,11 @@ DOT
         rank, size,
         arr
     );
-
-    MPI_Barrier(MPI_COMM_WORLD);
-    rprint("splitters: %p", splitters);
     // free(splitters);
-DOTR
-    rprint("self_arr: %p", self_arr);
     // free(self_arr);
-DOTR
-    rprint("count_arr: %p", count_arr);
-    MPI_Barrier(MPI_COMM_WORLD);
-    rprint_arr(count_arr, size);
+    // MPI_Barrier(MPI_COMM_WORLD);
     // free(count_arr);
-DOTR
     // free(new_buf1);
-DOTR
     return 0;
 }
 
