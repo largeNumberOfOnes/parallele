@@ -406,14 +406,18 @@ static inline void merge(
             dst[pointer++] = src2[pointer2++];
         }
     }
-    if (pointer1 == count1) { // DEV [Replace with memcpy!]
-        while (pointer2 < count2) {
-            dst[pointer++] = src2[pointer2++];
-        }
+    if (pointer1 == count1) {
+        memcpy(
+            dst + pointer,
+            src2 + pointer2,
+            (count2 - pointer2) * sizeof(int)
+        );
     } else {
-        while (pointer1 < count1) {
-            dst[pointer++] = src1[pointer1++];
-        }
+        memcpy(
+            dst + pointer,
+            src1 + pointer1,
+            (count1 - pointer1) * sizeof(int)
+        );
     }
 }
 
