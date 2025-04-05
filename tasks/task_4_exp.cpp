@@ -375,7 +375,7 @@ int calc_N(int rank, int digits, int argc, char** argv) {
 int main(int argc, char** argv) {
     RET_IF_ERR(MPI_Init(&argc, &argv));
 
-    check(
+    check_ames(
         argc > 2,
         "You should specify count of digits!"
     );
