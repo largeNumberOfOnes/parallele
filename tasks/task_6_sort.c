@@ -632,17 +632,17 @@ DOT
 
     MPI_Barrier(MPI_COMM_WORLD);
     rprint("splitters: %p", splitters);
-    free(splitters);
+    // free(splitters);
 DOTR
     rprint("self_arr: %p", self_arr);
-    free(self_arr);
+    // free(self_arr);
 DOTR
     rprint("count_arr: %p", count_arr);
     MPI_Barrier(MPI_COMM_WORLD);
     rprint_arr(count_arr, size);
-    free(count_arr);
+    // free(count_arr);
 DOTR
-    free(new_buf1);
+    // free(new_buf1);
 DOTR
     return 0;
 }
