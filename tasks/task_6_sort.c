@@ -363,6 +363,7 @@ void test_separate_elements() {
 
 static void swap_backets(
     int **buckets,
+    int *new_backets,
     int backets_count,
     int backets_size,
     int *count_arr
@@ -379,8 +380,8 @@ static void swap_backets(
     memcpy(count_arr, new_count_arr, backets_count * sizeof(int));
     free(new_count_arr);
 
-    int *new_backets = (int*) malloc(backets_count * backets_size *
-                                                            sizeof(int));
+    // int *new_backets = (int*) malloc(backets_count * backets_size *
+    //                                                         sizeof(int));
     RET_IF_ERR(
         MPI_Alltoall(
             *buckets, backets_size, MPI_INT,
@@ -388,8 +389,8 @@ static void swap_backets(
             MPI_COMM_WORLD
         )
     );
-    free(*buckets);
-    *buckets = new_backets;
+    // free(*buckets);
+    // *buckets = new_backets;
 }
 
 static inline void merge(
@@ -603,15 +604,15 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
         splitters
     );
 
-    swap_backets(&self_arr, size, self_count, count_arr);
-
     int new_count = 0;
     int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
     int *new_buf2 = new_buf1 + count;
-    merge_backets(self_arr, new_buf1, count, size, count_arr, &new_count);
+    swap_backets(&self_arr, new_buf1, size, self_count, count_arr);
+
+    merge_backets(new_buf1, self_arr, count, size, count_arr, &new_count);
 
     gather_backets(
-        new_buf1, new_buf2, self_arr, count_arr,
+        self_arr, new_buf1, new_buf2, count_arr,
         new_count, count,
         rank, size,
         arr
