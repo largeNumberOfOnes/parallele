@@ -365,21 +365,19 @@ static void swap_backets(
     int **buckets,
     int backets_count,
     int backets_size,
-    int **count_arr
+    int *count_arr
 ) {
 
     int *new_count_arr = (int*) malloc(backets_count * sizeof(int));
     RET_IF_ERR(
         MPI_Alltoall(
-            *count_arr, 1, MPI_INT,
+            count_arr, 1, MPI_INT,
             new_count_arr, 1, MPI_INT,
             MPI_COMM_WORLD
         )
     );
-    free(*count_arr);
-    *count_arr = new_count_arr;
-    // memcpy(count_arr, new_count_arr, backets_count);
-    // free(new_count_arr);
+    memcpy(count_arr, new_count_arr, backets_count * sizeof(int));
+    free(new_count_arr);
 
     int *new_backets = (int*) malloc(backets_count * backets_size *
                                                             sizeof(int));
@@ -605,7 +603,7 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
         splitters
     );
 
-    swap_backets(&self_arr, size, self_count, &count_arr);
+    swap_backets(&self_arr, size, self_count, count_arr);
 
     int new_count = 0;
     int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
