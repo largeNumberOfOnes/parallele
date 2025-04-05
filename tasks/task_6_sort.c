@@ -574,7 +574,15 @@ int main(int argc, char **argv) {
         "You should specify more than 1 proc for this program!"
     );
 
-    int count = size*15;
+    int count_per_proc = 15;
+    if (argc == 2) {
+        int N = atoi(argv[1]);
+        if (N != 0) {
+            count_per_proc = N;
+        }
+    }
+
+    int count = size*count_per_proc;
     int *arr = NULL;
     if (rank == main_rank) {
         arr = generate_random_array(count, 1000, 7);
