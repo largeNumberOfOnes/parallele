@@ -1,21 +1,26 @@
-
-
 #include "mpi.h"
 #include "../slibs/err_proc.h"
-#include <assert.h>
-#include <bits/types/struct_tm.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+
+
+// ------------------------------------ Nice things for working with arrays
+
 void print_arr(int *arr, int count) {
-    for (int q = 0; q < count; ++q) {
+    check(arr);
+    check(count > 0);
+
+    for (int q = 0; q < count - 1; ++q) {
         printf("%d, ", arr[q]);
     }
-    printf("\n");
+    printf("%d\n", arr[count - 1]);
 }
 
 int check_arr(int *arr, int count) {
+    check(arr);
+
     int correct = 1;
     for (int q = 1; q < count; ++q) {
         if (arr[q] < arr[q-1]) {
@@ -26,88 +31,21 @@ int check_arr(int *arr, int count) {
     return 1;
 }
 
-void calc_layers(int count, int *layers, int *reminder) {
-    int ret_layers = 0;
-    for (int q = 1; count > q; q <<= 1) {
-        count -= q;
-        ++ret_layers;
+int *generate_random_array(int count, int max, int seed) {
+    srand(seed);
+    int *arr = (int*) malloc(count*sizeof(int));
+    for (int q = 0; q < count; ++q) {
+        arr[q] = rand() % max;
     }
-    if (count > 0) {
-        ++ret_layers;
-    }
-
-    *layers = ret_layers;
-    *reminder = count;
+    return arr;
 }
 
-void test_calc_layers() {
-    int layers, reminder;
-    #define TEST_MACRO(count, lay_exp, rem_exp) {                         \
-        calc_layers((count), &layers, &reminder);                         \
-        assert(layers == (lay_exp));                                      \
-        assert(reminder == (rem_exp));                                    \
-    }
-    TEST_MACRO(  0, 0, 0);
-    TEST_MACRO(  1, 1, 1);
-    TEST_MACRO(  7, 3, 4);
-    TEST_MACRO(  8, 4, 1);
-    TEST_MACRO( 10, 4, 3);
-    TEST_MACRO( 15, 4, 8);
-    TEST_MACRO( 16, 5, 1);
-    TEST_MACRO( 20, 5, 5);
-    TEST_MACRO(128, 8, 1);
-    TEST_MACRO(340, 9, 85);
-
-    #undef TEST_MACRO
-}
-
-void swap(int *a, int *b) {
-    int tmp = *a;
-    *a = *b;
-    *b = tmp;
-}
-
-void heapsort_(int *arr, int count) {
-    assert(arr);
-    assert(count > 0);
-
-    int layers = 0, reminder = 0;
-    calc_layers(count, &layers, &reminder);
-    int last_root = 0;
-    int first_root = 1 + count - reminder;
-    for (int layer = layers - 2; layer >= 0; --layer) {
-        last_root = first_root - 1;
-        first_root = last_root - (1 << layer) + 1;
-        // printf("first_root = %d\nlast_root = %d\n", first_root, last_root);
-        for (int root = first_root; root < last_root + 1; ++root) {
-            int l = 2*root + 1;
-            int r = 2*root + 2;
-            if (r < count && arr[r] > arr[root]) {
-                swap(&arr[r], &arr[root]);
-            }
-            if (l < count && arr[l] > arr[root]) {
-                swap(&arr[l], &arr[root]);
-            }
-            if (r < count && l < count && arr[r] > arr[l]) {
-                swap(&arr[r], &arr[l]);
-            }
-        }
-    }
-}
-
-void heapsort(int *arr, int count) {
-    assert(arr);
-    assert(count > 0);
-
-    for (int q = count; q > 0; --q) {
-        heapsort_(arr, q);
-        swap(&arr[0], &arr[q-1]);
-    }
-}
+// --------------------------------------------------------------- heapsort
+// Standard heapsort realization
 
 void heapify(int *arr, int n, int i) {
-    assert(arr);
-    assert(n > 0);
+    check(arr);
+    check(n > 0);
 
     int largest = i;
     int left  = 2 * i + 1;
@@ -127,7 +65,7 @@ void heapify(int *arr, int n, int i) {
     }
 }
 
-void heap_sort(int *arr, int n) {
+void heapsort(int *arr, int n) {
     for (int i = n / 2 - 1; i > -1; --i)
         heapify(arr, n, i);
 
@@ -139,18 +77,30 @@ void heap_sort(int *arr, int n) {
     }
 }
 
-int partition(int *arr, int l, int r) {
+// -------------------------------------------------------------- quicksort
+// Standard quicksort realization
+
+void swap_int(int *a, int *b) {
+    int tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+static int partition(int *arr, int l, int r) {
     int v = arr[(l + r) / 2];
     int i = l;
     int j = r;
     while (i <= j) {
-        while (arr[i] < v)
+        while (arr[i] < v) {
            i++;
-        while (arr[j] > v)
+        }
+        while (arr[j] > v) {
            j--;
-        if (i >= j) 
+        }
+        if (i >= j) {
            break;
-        swap(&arr[i++], &arr[j--]);
+        }
+        swap_int(&arr[i++], &arr[j--]);
     }
     return j;
 }
@@ -163,91 +113,7 @@ void quicksort(int *arr, int l, int r) {
     }
 }
 
-int *generate_random_array(int count, int max) {
-    int *arr = (int*) malloc(count*sizeof(int));
-    for (int q = 0; q < count; ++q) {
-        arr[q] = rand() % max;
-    }
-    return arr;
-}
-
-// void insertion_sort(int *arr, )
-
-void no_sample_sort(int **arr, int *n, MPI_Comm comm) {
-    int rank, size;
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-
-    // 1. Локальная сортировка
-    // insertion_sort(*arr, *n);
-
-    // 2. Выбор сплиттеров (p-1 элементов)
-    int *splitters = (int *)malloc((size - 1) * sizeof(int));
-    for (int i = 0; i < size - 1; i++) {
-        splitters[i] = (*arr)[(*n * (i + 1)) / size];
-    }
-
-    // 3. Сбор всех сплиттеров в процессе 0 и рассылка
-    int *global_splitters = NULL;
-    if (rank == 0) {
-        global_splitters = (int *)malloc(size * (size - 1) * sizeof(int));
-    }
-    MPI_Gather(splitters, size - 1, MPI_INT, 
-               global_splitters, size - 1, MPI_INT, 0, comm);
-
-    if (rank == 0) {
-        // insertion_sort(global_splitters, size * (size - 1));
-        for (int i = 0; i < size - 1; i++) {
-            splitters[i] = global_splitters[(i + 1) * size];
-        }
-        free(global_splitters);
-    }
-    MPI_Bcast(splitters, size - 1, MPI_INT, 0, comm);
-
-    int *send_counts = (int *)calloc(size, sizeof(int));
-    int *recv_counts = (int *)calloc(size, sizeof(int));
-    for (int i = 0; i < *n; i++) {
-        int x = (*arr)[i];
-        int dest = 0;
-        while (dest < size - 1 && x >= splitters[dest]) {
-            dest++;
-        }
-        send_counts[dest]++;
-    }
-
-    MPI_Alltoall(send_counts, 1, MPI_INT, recv_counts, 1, MPI_INT, comm);
-
-    int total_recv = 0;
-    for (int i = 0; i < size; i++) {
-        total_recv += recv_counts[i];
-    }
-
-    int *recv_buf = (int *)malloc(total_recv * sizeof(int));
-    int *send_displs = (int *)calloc(size, sizeof(int));
-    int *recv_displs = (int *)calloc(size, sizeof(int));
-
-    for (int i = 1; i < size; i++) {
-        send_displs[i] = send_displs[i - 1] + send_counts[i - 1];
-        recv_displs[i] = recv_displs[i - 1] + recv_counts[i - 1];
-    }
-
-    MPI_Alltoallv(*arr, send_counts, send_displs, MPI_INT,
-                  recv_buf, recv_counts, recv_displs, MPI_INT, comm);
-
-    free(*arr);
-    *arr = recv_buf;
-    *n = total_recv;
-
-    // 9. Финальная локальная сортировка
-    // insertion_sort(*arr, *n);
-    // quicksort(arr, 0, count - 1);
-
-    free(splitters);
-    free(send_counts);
-    free(recv_counts);
-    free(send_displs);
-    free(recv_displs);
-}
+// ------------------------------------------------------------ sample_sort
 
 const int main_rank = 0;
 
@@ -576,7 +442,7 @@ static void gather_backets(
     }
 }
 
-int sample_sort_alg(int *arr, int count, int rank, int size) {
+void samplesort_alg(int *arr, int count, int rank, int size) {
     int self_count = count / size;
     int *self_arr = (int*) malloc(count * sizeof(int));
 
@@ -624,21 +490,58 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
     // MPI_Barrier(MPI_COMM_WORLD);
     // free(count_arr);
     free(new_buf1);
-    return 0;
 }
 
-int sample_sort(int *arr, int count, int rank, int size) {
-
+void samplesort(int *arr, int count, int rank, int size) {
     check(rank != 0 || arr);
     check(size > 1);
     check(count % size == 0);
 
-    RET_IF_ERR(
-        sample_sort_alg(arr, count, rank, size)
-    );
-
-    return 0;
+    samplesort_alg(arr, count, rank, size);
 }
+
+void get_arr_for_testing_samplesort(int **ret_arr, int *ret_count) {
+    /**
+     * The sorting of this array must be performed by three processors.
+     * After local sort
+     *    #0  1  2  3  4  5  6  7  8
+     *     2  6  7  8 10 12 14 20 26
+     *     1  4 13 15 17 18 19 23 25
+     *     3  5  9 11 16 21 22 24 27
+     * Indexes of the auxiliary array
+     *     0, 3, 6
+     * Elements of the auxiliary array
+     *     2  8 14
+     *     1 15 19
+     *     3 11 22
+     * Merged auxiliary array
+     *     1  2  3  8 11 14 15 19 22
+     * Selected splitters(by indexes: 4, 7):
+     *     11 19
+     * Separation into buckets
+     *     2  6  7  8 10 | 12 14 | 20 26
+     *     1  4 | 13 15 17 18 19 | 23 25
+     *     3  5  9 11 | 16 | 21 22 24 27
+     * Joined buckets on every processor
+     *     2 6 7 8 10 1 4 3 5 9 11 
+     *     12 14 13 15 17 18 19 16
+     *     20 26 23 25 21 22 24 27
+     * Sorted array
+     *     1 2 3 4 5 6 7 8 9 10 11 12 13 14 
+     *     15 16 17 18 19 20 21 22 23 24 25 26 27
+     */
+    static int arr[] = {
+        20,  8, 14,  7, 26, 12,  6,  2, 10,
+        19,  1, 23, 18, 25, 17, 13, 15,  4,
+        9 ,  3, 21, 24,  5, 22, 16, 11, 27,
+    };
+    const int count = sizeof(arr)/sizeof(arr[0]);
+
+    *ret_arr = arr;
+    *ret_count = count;
+}
+
+// ------------------------------------------------------------------- main
 
 int main(int argc, char **argv) {
     RET_IF_ERR(MPI_Init(&argc, &argv));
@@ -655,20 +558,10 @@ int main(int argc, char **argv) {
         "You should specify more than 1 proc for this program!"
     )
 
-    // test_calc_layers();
-    // int arr[] = {
-    //     20,  8, 14,  7, 26, 12,  6,  2, 10,
-    //     19,  1, 23, 18, 25, 17, 13, 15,  4,
-    //     9 ,  3, 21, 24,  5, 22, 16, 11, 27,
-    // };
-    // int count = sizeof(arr)/sizeof(arr[0]);
-    // heap_sort(arr, count);
-
     int count = size*15;
-    srand(7);
     int *arr = NULL;
     if (rank == main_rank) {
-        arr = generate_random_array(count, 1000);
+        arr = generate_random_array(count, 1000, 7);
         print_arr(arr, count);
     }
 
@@ -679,13 +572,13 @@ int main(int argc, char **argv) {
     // if (rank == main_rank) {
     //     print_arr(arr, count);
     // }
-    sample_sort(arr, count, rank, size);
+    
+    samplesort(arr, count, rank, size);
+    // if (rank == main_rank) { heapsort(arr, count); }
+
     if (rank == main_rank) {
         print_arr(arr, count);
     }
-    // if (rank != main_rank) {
-    //     return 0;
-    // }
     
     if (rank == main_rank) {
         printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
