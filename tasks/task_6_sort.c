@@ -369,19 +369,17 @@ static void swap_backets(
     int *count_arr
 ) {
 
-    int *new_count_arr = (int*) malloc(backets_count * sizeof(int));
+    int *temp_count_arr = (int*) malloc(backets_count * sizeof(int));
     RET_IF_ERR(
         MPI_Alltoall(
             count_arr, 1, MPI_INT,
-            new_count_arr, 1, MPI_INT,
+            temp_count_arr, 1, MPI_INT,
             MPI_COMM_WORLD
         )
     );
-    memcpy(count_arr, new_count_arr, backets_count * sizeof(int));
-    free(new_count_arr);
+    memcpy(count_arr, temp_count_arr, backets_count * sizeof(int));
+    free(temp_count_arr);
 
-    // int *new_backets = (int*) malloc(backets_count * backets_size *
-    //                                                         sizeof(int));
     RET_IF_ERR(
         MPI_Alltoall(
             *buckets, backets_size, MPI_INT,
@@ -389,8 +387,6 @@ static void swap_backets(
             MPI_COMM_WORLD
         )
     );
-    // free(*buckets);
-    // *buckets = new_backets;
 }
 
 static inline void merge(
@@ -617,11 +613,11 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
         rank, size,
         arr
     );
-    // free(splitters);
-    // free(self_arr);
+    free(splitters);
+    free(self_arr);
     // MPI_Barrier(MPI_COMM_WORLD);
     // free(count_arr);
-    // free(new_buf1);
+    free(new_buf1);
     return 0;
 }
 
