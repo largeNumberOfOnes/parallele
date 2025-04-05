@@ -431,12 +431,54 @@ static void gather_backets(
     }
 }
 
-static void separate_on_backets() {
+static void separate_on_backets(
+    int *self_arr,
+    int *count_arr,
+    int self_count,
+    int count,
+    int rank,
+    int size
+) {
+    int splitters_count = size;
+    int *splitters = (int*) malloc(splitters_count * sizeof(int));
+    calc_splitters(self_arr, splitters, self_count, rank, size);
 
+    separate_elements(
+        self_arr, count,
+        self_count,
+        size,
+        count_arr,
+        splitters
+    );
+
+    free(splitters);
 }
 
-static void merge_into_arr() {
+static void merge_into_arr(
+    int *self_arr,
+    int *count_arr,
+    int self_count,
+    int count,
+    int rank,
+    int size,
+    int *ret_arr
+) {
+    int new_count = 0;
+    int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
+    int *new_buf2 = new_buf1 + count;
 
+    swap_backets(&self_arr, new_buf1, size, self_count, count_arr);
+
+    merge_backets(new_buf1, self_arr, count, size, count_arr, &new_count);
+
+    gather_backets(
+        self_arr, new_buf1, new_buf2, count_arr,
+        new_count, count,
+        rank, size,
+        ret_arr
+    );
+
+    free(new_buf1);
 }
 
 void samplesort_alg(int *arr, int count, int rank, int size) {
@@ -453,37 +495,20 @@ void samplesort_alg(int *arr, int count, int rank, int size) {
 
     quicksort(self_arr, 0, self_count-1);
 
-    int splitters_count = size;
-    int *splitters = (int*) malloc(splitters_count * sizeof(int));
-    calc_splitters(self_arr, splitters, self_count, rank, size);
-
     int *count_arr = (int*) malloc(size * sizeof(int));
-    separate_elements(
-        self_arr, count,
-        self_count,
-        size,
-        count_arr,
-        splitters
+    separate_on_backets(
+        self_arr, count_arr, self_count, count,
+        rank, size
     );
-    free(splitters);
 
-    int new_count = 0;
-    int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
-    int *new_buf2 = new_buf1 + count;
-    swap_backets(&self_arr, new_buf1, size, self_count, count_arr);
-
-    merge_backets(new_buf1, self_arr, count, size, count_arr, &new_count);
-
-    gather_backets(
-        self_arr, new_buf1, new_buf2, count_arr,
-        new_count, count,
-        rank, size,
+    merge_into_arr(
+        self_arr, count_arr, self_count, count,
+        rank, size, 
         arr
     );
 
     free(self_arr);
     free(count_arr);
-    free(new_buf1);
 }
 
 void samplesort(int *arr, int count, int rank, int size) {
