@@ -509,8 +509,10 @@ static inline void swap_pointers(int **a, int **b) {
 
 static inline void update_counts(int *counts_arr, int count, int q) {
     for (int w = 0; w < count; w += 2*q) {
-        counts_arr[w]     += (w + q < count) ? counts_arr[w + q] : 0;
-        counts_arr[w + q] =  0;
+        if (w + q < count) {
+            counts_arr[w]     += counts_arr[w + q];
+            counts_arr[w + q] =  0;
+        }
     }
 }
 
