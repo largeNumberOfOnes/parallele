@@ -15,6 +15,17 @@ void print_arr(int *arr, int count) {
     printf("\n");
 }
 
+int check_arr(int *arr, int count) {
+    int correct = 1;
+    for (int q = 1; q < count; ++q) {
+        if (arr[q] < arr[q-1]) {
+            correct = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 void calc_layers(int count, int *layers, int *reminder) {
     int ret_layers = 0;
     for (int q = 1; count > q; q <<= 1) {
@@ -245,8 +256,7 @@ static void calc_splitters(
     int count,
     int rank,
     int size,
-    int **ret_splitters,
-    int *ret_splitters_count
+    int **ret_splitters
 ) {
     int splitters_count = size;
     int *splitters = (int*) malloc(splitters_count * sizeof(int));
@@ -269,14 +279,12 @@ static void calc_splitters(
 
     if (rank == main_rank) {
         quicksort(all_splitters, 0, all_splitters_count - 1);
-    }
-    if (rank == main_rank) {
         int offset = size/2 - 1;
         for (int q = 1; q < size; ++q) {
             splitters[q-1] = all_splitters[q*size + offset];
         }
+        free(all_splitters);
     }
-    free(all_splitters);
 
     RET_IF_ERR(
         MPI_Bcast(
@@ -286,44 +294,37 @@ static void calc_splitters(
     );
 
     *ret_splitters = splitters;
-    *ret_splitters_count = splitters_count;
 }
 
 static void separate_elements(
     int *buf, int buf_size,
-    int elements_count,
+    int backet_size,
     int backets_count,
     int *count_arr,
     int *splitters
 ) {
-
-    int element_position = 0;
-
-    for (int q = 0; q < elements_count; ++q) {
-        if (buf[q] > splitters[0]) {
-            element_position = q;
-            count_arr[0] = q;
-            break;
-        }
-    }
-
-    int backet_offset = elements_count;
+    int backet_offset = 0;
     int backet_position = 0;
-    int splitters_position = 1;
-    for (int q = element_position; q < elements_count; ++q) {
-        if (buf[q] > splitters[splitters_position]
-            && splitters_position < backets_count-1
+    int buf_pointer = 0;
+    int elements_count = backet_size;
+    for (int backet = 0; backet < backets_count - 1; ++backet) {
+        while (buf[buf_pointer] <= splitters[backet]
+               && buf_pointer < elements_count
         ) {
-            count_arr[splitters_position] = backet_position;   
-            ++splitters_position;
-            backet_offset += elements_count;
-            backet_position = 0;
+            buf[backet*backet_size + backet_position] = buf[buf_pointer];
+            ++backet_position;
+            ++buf_pointer;
         }
-        buf[backet_offset + backet_position] = buf[q];
+        count_arr[backet] = backet_position;
+        backet_position = 0;
+    }
+    backet_offset = (backets_count-1)*backet_size;
+    while (buf_pointer < elements_count) {
+        buf[backet_offset + backet_position] = buf[buf_pointer];
         ++backet_position;
+        ++buf_pointer;
     }
     count_arr[backets_count - 1] = backet_position;
-
 }
 
 void test_separate_elements() {
@@ -482,6 +483,8 @@ static void merge_backets(
         pointers[min] += 1;
     }
 
+    free(pointers);
+
     *new_count = new_buf_size;
 }
 
@@ -533,7 +536,6 @@ static void gather_backets(
             MPI_COMM_WORLD
         )
     );
-    // int self_count = counts_arr[rank];
 
     const int TAG = 0;
     for (int q = 1; q < size; q *= 2) {
@@ -585,12 +587,18 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
 
     quicksort(self_arr, 0, self_count-1);
 
+rprint_arr(self_arr, self_count);
+// rprint("correct: %s\n", check_arr(self_arr, self_count) ? "true" : "false");
+
     int splitters_count = size;
     int *splitters = NULL;
     calc_splitters(
         self_arr, self_count, rank, size,
-        &splitters, &splitters_count
+        &splitters
     );
+
+rprint("splitters:");
+rprint_arr(splitters, splitters_count-1);
 
     int *count_arr = (int*) malloc(size * sizeof(int));
     separate_elements(
@@ -601,14 +609,19 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
         splitters
     );
 
+rprint("");
+rprint("backets:");
+rprint_arr(self_arr, count);
+rprint_arr(count_arr, size);
+
     swap_buckets(&self_arr, size, self_count, &count_arr);
-    
+DOT
     int new_count = 0;
     int *new_buf1 = (int*) malloc(2 * count * sizeof(int));
     int *new_buf2 = new_buf1 + count;
     merge_backets(self_arr, new_buf1, count, size, count_arr, &new_count);
-
-    // rprint_arr(new_buf1, new_count);
+DOT
+    rprint_arr(new_buf1, new_count);
 
     gather_backets(
         new_buf1, new_buf2, self_arr, count_arr,
@@ -616,11 +629,15 @@ int sample_sort_alg(int *arr, int count, int rank, int size) {
         rank, size,
         arr
     );
-
+DOTR
+    // free(splitters);
+DOTR
     free(self_arr);
+DOTR
     free(count_arr);
+DOTR
     free(new_buf1);
-
+DOTR
     return 0;
 }
 
@@ -666,6 +683,7 @@ int main(int argc, char **argv) {
     int *arr = NULL;
     if (rank == main_rank) {
         arr = generate_random_array(count, 1000);
+        print_arr(arr, count);
     }
 
     // if (rank != main_rank) {
@@ -684,14 +702,11 @@ int main(int argc, char **argv) {
     // }
     
     if (rank == main_rank) {
-        int correct = 1;
-        for (int q = 1; q < count; ++q) {
-            if (arr[q] < arr[q-1]) {
-                correct = 0;
-                break;
-            }
-        }
-        printf("correct: %s\n", correct ? "true" : "false");
+        printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
+    }
+
+    if (rank == main_rank) {
+        free(arr);
     }
 
     MPI_Finalize();
