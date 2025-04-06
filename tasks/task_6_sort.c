@@ -130,6 +130,60 @@ void quicksort(int *arr, int l, int r) {
     }
 }
 
+// ------------------------------------------------------------- radix_sort
+
+int get_max(int *arr, int count) {
+    int max = arr[0];
+    for (int q = 1; q < count; ++q) {
+        if (arr[q] > max) {
+            max = arr[q];
+        }
+    }
+    return max;
+}
+
+// Функция Counting Sort для сортировки по разряду (exp)
+void countingSort(int arr[], int n, int exp) {
+    // int output[n]; // Выходной массив
+    // int *output = (int*) calloc(n, sizeof(int));
+    int output[1000];
+    int count[10] = {0}; // Счётчик цифр (0-9)
+
+    // Подсчёт количества вхождений каждой цифры
+    for (int i = 0; i < n; i++) {
+        int digit = (arr[i] / exp) % 10;
+        count[digit]++;
+    }
+
+    // Накопление суммы для определения позиций
+    for (int i = 1; i < 10; i++) {
+        count[i] += count[i - 1];
+    }
+
+    // Построение выходного массива
+    for (int i = n - 1; i >= 0; i--) {
+        int digit = (arr[i] / exp) % 10;
+        output[count[digit] - 1] = arr[i];
+        count[digit]--;
+    }
+
+    // Копирование отсортированного массива в исходный
+    for (int i = 0; i < n; i++) {
+        arr[i] = output[i];
+    }
+    // free(output);
+}
+
+// Основная функция Radix Sort
+void radixsort(int arr[], int n) {
+    int max = get_max(arr, n);
+
+    // Применяем Counting Sort для каждого разряда
+    for (int exp = 1; max / exp > 0; exp *= 10) {
+        countingSort(arr, n, exp);
+    }
+}
+
 // ------------------------------------------------------------ sample_sort
 
 static void calc_splitters(
@@ -578,22 +632,24 @@ void get_arr_for_testing_samplesort(int **ret_arr, int *ret_count) {
 typedef enum Mode_t {
     MODE_EXEC_HEAP = 1,
     MODE_EXEC_QUICK,
+    MODE_EXEC_RADIX,
     MODE_EXEC_SAMPLE,
     MODE_CHECK_HEAP,
     MODE_CHECK_QUICK,
+    MODE_CHECK_RADIX,
     MODE_CHECK_SAMPLE,
 } Mode;
 
 int is_mode_correct(Mode mode) {
-    return 0 < mode && mode < 7;
+    return 0 < mode && mode < 9;
 }
 
 int is_mode_exec(Mode mode) {
-    return 0 < mode && mode < 4;
+    return 0 < mode && mode < 5;
 }
 
 int is_mode_check(Mode mode) {
-    return 3 < mode && mode < 7;
+    return 4 < mode && mode < 9;
 }
 
 void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
@@ -619,6 +675,9 @@ void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
             case MODE_EXEC_QUICK:  
                 if (rank == main_rank) { quicksort(arr, 0, count - 1); }
                 break;
+            case MODE_EXEC_RADIX:  
+                if (rank == main_rank) { radixsort(arr, count); }
+                break;
             case MODE_EXEC_SAMPLE:
                 samplesort(arr, count, rank, size);
                 break;
@@ -628,7 +687,8 @@ void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
         if (rank == 0) {
             end = clock();
             double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
-            printf("time: %f on %d elements\n", delta_time, count);
+            // printf("time: %f on %d elements\n", delta_time, count);
+            printf("(%f, %d),\n", delta_time, count);
             // printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
             free(arr);
         }
@@ -665,6 +725,9 @@ void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
             break;
         case MODE_CHECK_QUICK:  
             if (rank == main_rank) { quicksort(arr, 0, count - 1); }
+            break;
+        case MODE_CHECK_RADIX:  
+            if (rank == main_rank) { radixsort(arr, count); }
             break;
         case MODE_CHECK_SAMPLE:
             samplesort(arr, count, rank, size);
