@@ -1,5 +1,18 @@
+/**
+ * RUN: ./prog <mode> <count_per_proc>
+ * mode - One of the following:
+ *        1 - run heapsort tim(N) dependence
+ *        2 - run quicksort tim(N) dependence
+ *        3 - run samplesort tim(N) dependence
+ *        4 - run heapsort test
+ *        5 - run quicksort test
+ *        6 - run samplesort test
+ */
+
 #include "mpi.h"
 #include "../slibs/err_proc.h"
+#include <limits.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -255,9 +268,9 @@ static void swap_backets(
 
 static inline void merge(
     int *dst,
-    int *src1,
+    const int *src1,
     int count1,
-    int *src2,
+    const int *src2,
     int count2
 ) {
     int pointer1 = 0;
@@ -313,7 +326,7 @@ static inline int find_backet_with_min_elem(
 }
 
 static void merge_backets(
-    int *buf,
+    const int *buf,
     int *help_buf,
     int buf_size,
     int backets_count,
@@ -560,11 +573,113 @@ void get_arr_for_testing_samplesort(int **ret_arr, int *ret_count) {
     *ret_count = count;
 }
 
-// ------------------------------------------------------------------- main
+// -------------------------------------------------------------------
 
-int main(int argc, char **argv) {
-    RET_IF_ERR(MPI_Init(&argc, &argv));
+typedef enum Mode_t {
+    MODE_EXEC_HEAP = 1,
+    MODE_EXEC_QUICK,
+    MODE_EXEC_SAMPLE,
+    MODE_CHECK_HEAP,
+    MODE_CHECK_QUICK,
+    MODE_CHECK_SAMPLE,
+} Mode;
 
+int is_mode_correct(Mode mode) {
+    return 0 < mode && mode < 7;
+}
+
+int is_mode_exec(Mode mode) {
+    return 0 < mode && mode < 4;
+}
+
+int is_mode_check(Mode mode) {
+    return 3 < mode && mode < 7;
+}
+
+void test_exec_time(Mode mode, int rank, int size) {
+    static int count_per_proc_arr[] = {
+        10, 20, 30, 40, 50, 60, 70, 80, 90,
+        100, 200, 300, 400, 500, 600, 700, 800, 900,
+        1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000,
+        10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000,
+        100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000, 900000,
+    };
+    int test_count = sizeof(count_per_proc_arr)/sizeof(int);
+
+    for (int q = 0; q < test_count; ++q) {
+        // int count =  count_per_proc_arr[q] * (sep_on_procs ? size : 1);
+        int *arr = NULL;
+        if (rank == main_rank) {
+            // arr = generate_random_array(count, INT_MAX, 7);
+        }
+        RET_IF_ERR(MPI_Barrier(MPI_COMM_WORLD));
+        
+        clock_t start, end;
+        if (rank == 0) {
+            start = clock();
+        }
+
+        // sort_algor(arr, count, rank, size);
+
+        if (rank == 0) {
+            end = clock();
+            double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
+            printf("time: %f\n", delta_time);
+            free(arr);
+        }
+    }
+}
+
+void wrapper_heapsort(int *arr, int count, int rank, int size) {
+    heapsort(arr, count);
+}
+
+void wrapper_quicksort(int *arr, int count, int rank, int size) {
+    quicksort(arr, 0, count - 1);
+}
+
+void wrapper_samplesort(int *arr, int count, int rank, int size) {
+    samplesort(arr, count, rank, size);
+}
+
+void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
+    clock_t start, end;
+    int count = count_per_proc*size;
+    int *arr = NULL;
+    if (rank == main_rank) {
+        printf("Sorting random array of len %d\n", count);
+        arr = generate_random_array(count, 1000, 7);
+        start = clock();
+    }
+
+    switch (mode) {
+        case MODE_CHECK_HEAP:
+            if (rank == main_rank) { heapsort(arr, count); }
+            break;
+        case MODE_CHECK_QUICK:  
+            if (rank == main_rank) { quicksort(arr, 0, count - 1); }
+            break;
+        case MODE_CHECK_SAMPLE:
+            samplesort(arr, count, rank, size);
+            break;
+        default: check_ames(0, "Incorect mode");
+    }
+
+    if (rank == main_rank) {
+        end = clock();
+        double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
+        printf("time: %f\n", delta_time);
+        printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
+        free(arr);
+    }
+}
+
+void parse_params(
+    int argc,
+    char **argv,
+    Mode *ret_mode,
+    int *ret_count_per_proc
+) {
     int rank, size;
     RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
@@ -573,30 +688,39 @@ int main(int argc, char **argv) {
         size > 1,
         "You should specify more than 1 proc for this program!"
     );
+    check_ames(
+        argc == 3,
+        "You should specify 2 arguments: mode and count_per_proc"
+    );
 
-    int count_per_proc = 15;
-    if (argc == 2) {
-        int N = atoi(argv[1]);
-        if (N != 0) {
-            count_per_proc = N;
-        }
-    }
+    Mode mode = atoi(argv[1]);
+    int count_per_proc = atoi(argv[2]);
+    check_ames(is_mode_correct(mode), "Mode must be int in range [1, 6]");
+    check_ames(0 < count_per_proc, "count_per_proc must be positive int");
 
-    int count = size*count_per_proc;
-    int *arr = NULL;
-    if (rank == main_rank) {
-        arr = generate_random_array(count, 1000, 7);
-        print_arr(arr, count);
-    }
+    *ret_mode = mode;
+    *ret_count_per_proc = count_per_proc;
+}
+
+// ------------------------------------------------------------------- main
+
+int main(int argc, char **argv) {
+    RET_IF_ERR(MPI_Init(&argc, &argv));
+
+    int rank, size;
+    RET_IF_ERR(MPI_Comm_rank(MPI_COMM_WORLD, &rank));
+    RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
     
-    samplesort(arr, count, rank, size);
-    // if (rank == main_rank) { heapsort(arr, count); }
-    // if (rank == main_rank) { quicksort(arr, 0, count - 1); }
+    Mode mode = 0;
+    int count_per_proc = 0;
+    parse_params(argc, argv, &mode, &count_per_proc);
 
-    if (rank == main_rank) {
-        // print_arr(arr, count);
-        printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
-        free(arr);
+    if (is_mode_exec(mode)) {
+        test_exec_time(mode, rank, size);
+    } else if (is_mode_check(mode)) {
+        test_correctness(mode, count_per_proc, rank, size);
+    } else {
+        check_ames(0, "Unknown mode");
     }
 
     MPI_Finalize();
