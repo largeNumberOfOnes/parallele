@@ -573,7 +573,7 @@ void get_arr_for_testing_samplesort(int **ret_arr, int *ret_count) {
     *ret_count = count;
 }
 
-// -------------------------------------------------------------------
+// ------------------------------------------------------------------------
 
 typedef enum Mode_t {
     MODE_EXEC_HEAP = 1,
@@ -596,21 +596,14 @@ int is_mode_check(Mode mode) {
     return 3 < mode && mode < 7;
 }
 
-void test_exec_time(Mode mode, int rank, int size) {
-    static int count_per_proc_arr[] = {
-        10, 20, 30, 40, 50, 60, 70, 80, 90,
-        100, 200, 300, 400, 500, 600, 700, 800, 900,
-        1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000,
-        10000, 20000, 30000, 40000, 50000, 60000, 70000, 80000, 90000,
-        100000, 200000, 300000, 400000, 500000, 600000, 700000, 800000, 900000,
-    };
-    int test_count = sizeof(count_per_proc_arr)/sizeof(int);
-
-    for (int q = 0; q < test_count; ++q) {
-        // int count =  count_per_proc_arr[q] * (sep_on_procs ? size : 1);
+void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
+    int max = count_per_proc;
+    int points_count = 100;
+    for (int q = 1; q < max; q += max/points_count) {
+        int count =  q * (mode == MODE_EXEC_SAMPLE ? size : 1);
         int *arr = NULL;
         if (rank == main_rank) {
-            // arr = generate_random_array(count, INT_MAX, 7);
+            arr = generate_random_array(count, INT_MAX, 7);
         }
         RET_IF_ERR(MPI_Barrier(MPI_COMM_WORLD));
         
@@ -619,12 +612,24 @@ void test_exec_time(Mode mode, int rank, int size) {
             start = clock();
         }
 
-        // sort_algor(arr, count, rank, size);
+        switch (mode) {
+            case MODE_EXEC_HEAP:
+                if (rank == main_rank) { heapsort(arr, count); }
+                break;
+            case MODE_EXEC_QUICK:  
+                if (rank == main_rank) { quicksort(arr, 0, count - 1); }
+                break;
+            case MODE_EXEC_SAMPLE:
+                samplesort(arr, count, rank, size);
+                break;
+            default: check_ames(0, "Incorect mode");
+        }
 
         if (rank == 0) {
             end = clock();
             double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
-            printf("time: %f\n", delta_time);
+            printf("time: %f on %d elements\n", delta_time, count);
+            // printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
             free(arr);
         }
     }
@@ -649,6 +654,8 @@ void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
     if (rank == main_rank) {
         printf("Sorting random array of len %d\n", count);
         arr = generate_random_array(count, 1000, 7);
+        // arr = (int*) malloc(count * sizeof(int));
+        // for (int q = 0; q < count; ++q) { arr[q] = 7; }
         start = clock();
     }
 
@@ -716,7 +723,7 @@ int main(int argc, char **argv) {
     parse_params(argc, argv, &mode, &count_per_proc);
 
     if (is_mode_exec(mode)) {
-        test_exec_time(mode, rank, size);
+        test_exec_time(mode, count_per_proc, rank, size);
     } else if (is_mode_check(mode)) {
         test_correctness(mode, count_per_proc, rank, size);
     } else {
