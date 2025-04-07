@@ -132,55 +132,32 @@ void quicksort(int *arr, int l, int r) {
 
 // ------------------------------------------------------------- radix_sort
 
-int get_max(int *arr, int count) {
+int getMax(int arr[], int n) {
     int max = arr[0];
-    for (int q = 1; q < count; ++q) {
-        if (arr[q] > max) {
-            max = arr[q];
-        }
-    }
+    for (int i = 1; i < n; i++)
+        if (arr[i] > max)
+            max = arr[i];
     return max;
 }
 
-// Функция Counting Sort для сортировки по разряду (exp)
-void countingSort(int arr[], int n, int exp) {
-    // int output[n]; // Выходной массив
-    // int *output = (int*) calloc(n, sizeof(int));
-    int output[1000];
-    int count[10] = {0}; // Счётчик цифр (0-9)
-
-    // Подсчёт количества вхождений каждой цифры
+void countingSort(int arr[], int *output, int n, int exp) {
+    int count[10] = {0};
     for (int i = 0; i < n; i++) {
-        int digit = (arr[i] / exp) % 10;
-        count[digit]++;
+        count[(arr[i] / exp) % 10]++;
     }
-
-    // Накопление суммы для определения позиций
     for (int i = 1; i < 10; i++) {
         count[i] += count[i - 1];
     }
-
-    // Построение выходного массива
     for (int i = n - 1; i >= 0; i--) {
-        int digit = (arr[i] / exp) % 10;
-        output[count[digit] - 1] = arr[i];
-        count[digit]--;
+        output[count[(arr[i] / exp) % 10] - 1] = arr[i];
+        count[(arr[i] / exp) % 10]--;
     }
-
-    // Копирование отсортированного массива в исходный
-    for (int i = 0; i < n; i++) {
-        arr[i] = output[i];
-    }
-    // free(output);
 }
 
-// Основная функция Radix Sort
-void radixsort(int arr[], int n) {
-    int max = get_max(arr, n);
-
-    // Применяем Counting Sort для каждого разряда
+void radixsort(int arr[], int *output, int n) {
+    int max = getMax(arr, n);
     for (int exp = 1; max / exp > 0; exp *= 10) {
-        countingSort(arr, n, exp);
+        countingSort(arr, output, n, exp);
     }
 }
 
@@ -627,6 +604,23 @@ void get_arr_for_testing_samplesort(int **ret_arr, int *ret_count) {
     *ret_count = count;
 }
 
+// ----------------------------------------------------------- combinedsort
+
+void combinedsort(int *arr, int count, int rank, int size) {
+    check(rank != 0 || arr);
+    check(size > 1);
+    check(count % size == 0);
+
+    int switch_count = 300;
+    if (count < switch_count) {
+        if (rank == main_rank) {
+            quicksort(arr, 0, count - 1);
+        }
+    } else {
+        samplesort_alg(arr, count, rank, size);
+    }
+}
+
 // ------------------------------------------------------------------------
 
 typedef enum Mode_t {
@@ -711,9 +705,11 @@ void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
     clock_t start, end;
     int count = count_per_proc*size;
     int *arr = NULL;
+    int *buf = NULL;
     if (rank == main_rank) {
         printf("Sorting random array of len %d\n", count);
         arr = generate_random_array(count, 1000, 7);
+        buf = (int*) malloc(count * sizeof(int));
         // arr = (int*) malloc(count * sizeof(int));
         // for (int q = 0; q < count; ++q) { arr[q] = 7; }
         start = clock();
@@ -727,7 +723,7 @@ void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
             if (rank == main_rank) { quicksort(arr, 0, count - 1); }
             break;
         case MODE_CHECK_RADIX:  
-            if (rank == main_rank) { radixsort(arr, count); }
+            if (rank == main_rank) { radixsort(arr, buf, count); }
             break;
         case MODE_CHECK_SAMPLE:
             samplesort(arr, count, rank, size);
@@ -741,6 +737,7 @@ void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
         printf("time: %f\n", delta_time);
         printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
         free(arr);
+        free(buf);
     }
 }
 
@@ -792,6 +789,12 @@ int main(int argc, char **argv) {
     } else {
         check_ames(0, "Unknown mode");
     }
+
+    // if (rank == main_rank) {
+    //     int *arr = generate_random_array(100, 1000, 7);
+    //     // print_arr(arr, 100);
+    //     radixsort(arr, 100);
+    // }
 
     MPI_Finalize();
 
