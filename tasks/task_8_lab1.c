@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "math.h"
+#include <math.h>
 #include "../slibs/err_proc.h"
 
 
@@ -114,7 +114,6 @@ void matrix_dump(Matrix *matrix, FILE *file) {
     for (int q = 0; q < matrix->nt; ++q) {
         for (int w = 0; w < matrix->nx; ++w) {
             fprintf(file, "%f, ", matrix_get_elem(matrix, q, w));
-            // printf("%f, ", matrix_get_elem(matrix, q, w));
         }
         fprintf(file, "\n");
     }
@@ -122,43 +121,11 @@ void matrix_dump(Matrix *matrix, FILE *file) {
 
 // ------------------------------------------------------------------------
 
-// void calc_proc_problem(double *x0, double *x1, int *nx, int rank, int size) {
 void calc_proc_problem(Problem *problem, int rank, int size) {
     problem->nx /= size;
     double range_len = (problem->x1 - problem->x0);
     problem->x0 += rank*range_len/size;
     problem->x1  = problem->x0 + range_len/size;
-}
-
-void get_edje(
-    Matrix *matrix,
-    Problem *problem,
-    int edje_size,
-    int from,
-    int rank,
-    int size
-    // int *ret_arr
-) {
-    if (rank == main_rank) {
-        double tau = problem->tau;
-        for (int q = 0; q < edje_size; ++q) {
-            // ret_arr[q] = problem->u1(problem->t0 + q*tau);
-            matrix_set_elem(matrix, from + q, 0, problem->u1(problem->t0 + q*tau));
-        }
-    } else {
-        double *buf = (double*) malloc(edje_size * sizeof(double));
-        RET_IF_ERR(
-            MPI_Recv(
-                buf, edje_size, MPI_DOUBLE,
-                rank - 1, TAG_EDGE,
-                MPI_COMM_WORLD, MPI_STATUS_IGNORE
-            )
-        );
-        for (int q = 0; q < edje_size; ++q) {
-            matrix_set_elem(matrix, from + q, 0, buf[q]);
-        }
-        free(buf);
-    }
 }
 
 static inline double calc_next_elem(
@@ -174,24 +141,6 @@ static inline double calc_next_elem(
         - a*(right_down - left_up - left_down)/2/h)/(0.5/tau + a*0.5/h);
 }
 
-
-void calc_layer(Matrix *matrix, Problem *problem, int layer_number) {
-    for (int q = 1; q < problem->nx; ++q) {
-        calc_next_elem(
-            matrix_get_elem(matrix, layer_number    , q - 1),
-            matrix_get_elem(matrix, layer_number - 1, q - 1),
-            matrix_get_elem(matrix, layer_number - 1, q    ),
-            problem->a,
-            problem->f(
-                problem->x0 + (problem->h  )*(q + 0.5),
-                problem->t0 + (problem->tau)*(layer_number - 0.5)
-            ),
-            problem->tau,
-            problem->h
-        );
-    }
-}
-
 void calc_first_layer(Matrix *matrix, Problem *problem) {
     for (int q = 0; q < problem->nx; ++q) {
         matrix_set_elem(
@@ -199,42 +148,6 @@ void calc_first_layer(Matrix *matrix, Problem *problem) {
             problem->u0(problem->x0 + q*(problem->tau))
         );
     }
-}
-
-void calc_batch(Matrix *matrix, Problem *problem, int from, int batch_size, int rank, int size) {
-    get_edje(matrix, problem, batch_size, from, rank, size);
-    for (int q = 0; q < batch_size; ++q) {
-        calc_layer(matrix, problem, from + q);
-        print_arr(matrix->arr + (from + q)*matrix->nx, matrix->nx);
-    }
-    printf("\n\n");
-    for (int q = 0; q < batch_size; ++q) { printf("%d ", q); print_arr(matrix->arr + q*matrix->nx, matrix->nx); }
-}
-
-void send_edge(
-    Matrix *matrix,
-    int edje_size,
-    int edje_number,
-    int rank,
-    int size
-) {
-    double *buf = (double*) malloc(edje_size * sizeof(double));
-    for (int q = 0; q < edje_size; ++q) {
-        buf[q] = matrix_get_elem(
-            matrix,
-            edje_number*edje_size + q,
-            matrix->nx - 1
-        );
-    }
-    if (rank + 1 < size) {
-        RET_IF_ERR(
-            MPI_Send(
-                buf, edje_size, MPI_DOUBLE,
-                rank + 1, TAG_EDGE, MPI_COMM_WORLD
-            )
-        );
-    }
-    free(buf);
 }
 
 Matrix gather_matrixes(Matrix *matrix, int rank, int size) {
@@ -262,6 +175,96 @@ Matrix gather_matrixes(Matrix *matrix, int rank, int size) {
     return result;
 }
 
+void calc_layer(
+    Problem *problem,
+    double *new_layer,
+    double *prev_layer,
+    double t
+) {
+    for (int x_pos = 1; x_pos < problem->nx; ++x_pos) {
+        new_layer[x_pos] = calc_next_elem(
+            new_layer[x_pos - 1], 
+            prev_layer[x_pos - 1], 
+            prev_layer[x_pos], 
+            problem->a,
+            problem->f(
+                problem->x0 + x_pos*problem->h,
+                t
+            ),
+            problem->tau, problem->h
+        );
+    }
+}
+
+void send_edge(
+    double *buf,
+    int buf_w,
+    int buf_h,
+    double *edge_buf,
+    int rank,
+    int size
+) {
+    if (rank + 1 != size) {
+        for (int q = 0; q < buf_h; ++q) {
+            edge_buf[q] = buf[buf_w*(q+1) - 1];
+        }
+        RET_IF_ERR(
+            MPI_Send(
+                edge_buf, buf_h, MPI_DOUBLE, 
+                rank + 1, TAG_EDGE, 
+                MPI_COMM_WORLD
+            )
+        );
+    }
+}
+
+void recv_edge(
+    double *buf,
+    int buf_w,
+    int buf_h,
+    double *edge_buf,
+    Problem *problem,
+    double buf_start_t,
+    int rank,
+    int size
+) {
+    if (rank == main_rank) {
+        for (int q = 0; q < buf_h; ++q) {
+            buf[q*buf_w] = problem->u1(buf_start_t + q*problem->tau);
+        }
+    } else {
+        RET_IF_ERR(
+            MPI_Recv(
+                edge_buf, buf_h, MPI_DOUBLE, 
+                rank - 1, TAG_EDGE,
+                MPI_COMM_WORLD, MPI_STATUS_IGNORE
+            )
+        );
+        for (int q = 0; q < buf_h; ++q) {
+            buf[q*buf_w] = edge_buf[q];
+        }
+    }
+}
+
+void calc_batch(
+    double *buf,
+    int buf_w,
+    int buf_h,
+    Problem *problem,
+    double buf_start_t,
+    int calc_next_layer
+) {
+    // int calc_next_layer = buffer_number + 1 != problem.nt / batch_size;
+    for (int time_layer = 1; time_layer < buf_h + calc_next_layer; ++time_layer) {
+        calc_layer(
+            problem, 
+            buf + time_layer * buf_w,
+            buf + (time_layer - 1) * buf_w,
+            buf_start_t + time_layer*problem->tau
+        );
+    }
+}
+
 void calc(
     Problem problem,
     int rank,
@@ -286,61 +289,23 @@ void calc(
     assert(problem.nt % batch_size == 0);
 
     double *edje_buf = (double*) malloc(batch_size * sizeof(double));
-    // for (int time_layer = 1; time_layer < problem.nt; ++time_layer) {
     for (int buffer_number = 0; buffer_number < problem.nt / batch_size; ++buffer_number) {
         int buffer_size = matrix.nx * batch_size;
         double *buffer = matrix.arr + buffer_number * buffer_size;
 
-        if (rank == main_rank) {
-            // new_layer[0] = problem.u1(problem.x0 + problem.tau * time_layer);
-            for (int q = 0; q < batch_size; ++q) {
-                edje_buf[q] = problem.u1(problem.x0 + problem.tau * (buffer_number*buffer_size + q));
-            }
-        } else {
-            RET_IF_ERR(
-                MPI_Recv(
-                    edje_buf, batch_size, MPI_DOUBLE, 
-                    rank - 1, TAG_EDGE,
-                    MPI_COMM_WORLD, MPI_STATUS_IGNORE
-                )
-            );
-        }
-        for (int q = 0; q < batch_size; ++q) {
-            // matrix.arr[buffer_number*batch_size + q*matrix.nx] = edje_buf[q];
-            buffer[q*matrix.nx] = edje_buf[q];
-        }
-        // for (int time_layer = buffer_number*batch_size + 1; time_layer < buffer_number*(batch_size + 1) + (buffer_number + 1 == problem.nt / batch_size ? 1 : 2); ++time_layer) {
-        for (int time_layer = 1; time_layer < batch_size + (buffer_number + 1 != problem.nt / batch_size); ++time_layer) {
-            double *new_layer  = buffer + time_layer * matrix.nx;
-            double *prev_layer = buffer + (time_layer - 1) * matrix.nx;
-            for (int x_pos = 1; x_pos < problem.nx; ++x_pos) {
-                new_layer[x_pos] = calc_next_elem(
-                    new_layer[x_pos - 1], 
-                    prev_layer[x_pos - 1], 
-                    prev_layer[x_pos], 
-                    problem.a,
-                    problem.f(
-                        problem.x0 + x_pos*problem.h,
-                        problem.t0 + (buffer_number*batch_size + time_layer)*problem.tau
-                    ),
-                    problem.tau, problem.h
-                );
-            }
-        }
-        if (rank + 1 != size) {
-            for (int q = 0; q < batch_size; ++q) {
-                // edje_buf[q] = *(buffer + matrix.nx*(q+1) - 1);
-                edje_buf[q] = buffer[matrix.nx*(q+1) - 1];
-            }
-            RET_IF_ERR(
-                MPI_Send(
-                    // new_layer + problem.nx - 1, 1, MPI_DOUBLE, 
-                    edje_buf, batch_size, MPI_DOUBLE, 
-                    rank + 1, TAG_EDGE, 
-                    MPI_COMM_WORLD
-                )
-            );
-        }
+        recv_edge(
+            buffer, matrix.nx, batch_size,
+            edje_buf,
+            &problem, problem.t0 + (buffer_number*batch_size)*problem.tau,
+            rank, size
+        );
+        calc_batch(
+            buffer, matrix.nx, batch_size, 
+            &problem,
+            problem.t0 + buffer_number*batch_size*problem.tau,
+            buffer_number + 1 != problem.nt / batch_size
+        );
+        send_edge(buffer, matrix.nx, batch_size, edje_buf, rank, size);
     }
     free(edje_buf);
 
@@ -363,6 +328,8 @@ void calc(
 
     matrix_dstr(&matrix);
 }
+
+// ------------------------------------------------------------------- main
 
 double f(double x, double t) {
     return 0;
