@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <mpi.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdlib.h>
 #include "math.h"
 #include "../slibs/err_proc.h"
@@ -237,15 +238,26 @@ void send_edge(
 }
 
 Matrix gather_matrixes(Matrix *matrix, int rank, int size) {
+    Matrix buf = matrix_init(matrix->nx *size, matrix->nt);
     Matrix result = matrix_init(matrix->nx *size, matrix->nt);
 
     RET_IF_ERR(
         MPI_Gather(
             matrix->arr, matrix->size, MPI_DOUBLE, 
-            result.arr, matrix->size, MPI_DOUBLE, 
+            buf.arr, matrix->size, MPI_DOUBLE, 
             main_rank, MPI_COMM_WORLD
         )
     );
+
+    for (int proc = 0; proc < size; ++proc) {
+        for (int time_layer = 0; time_layer < matrix->nt; ++time_layer) {
+            memcpy(
+                result.arr + proc*matrix->nx + result.nx*time_layer,
+                buf.arr + proc*matrix->size + time_layer*matrix->nx,
+                sizeof(double) * matrix->nx
+            );
+        }
+    }
 
     return result;
 }
@@ -316,14 +328,14 @@ void calc(
     //     printf("\n");
     // )
 
-    Matrix result = matrix;
-    // Matrix result = gather_matrixes(&matrix, rank, size);
+    // Matrix result = matrix;
+    Matrix result = gather_matrixes(&matrix, rank, size);
     if (rank == main_rank) {
         FILE *file = fopen("output/calc.txt", "w");
         matrix_dump(&result, file);
         fclose(file);
     }
-    // matrix_dstr(&result);
+    matrix_dstr(&result);
 
     matrix_dstr(&matrix);
 }
