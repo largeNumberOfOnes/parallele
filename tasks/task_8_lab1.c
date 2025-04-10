@@ -280,45 +280,69 @@ void calc(
         printf("First layer\n");
         print_arr(matrix.arr, matrix.nx);
     )
-    
-    for (int time_layer = 1; time_layer < problem.nt; ++time_layer) {
-        double *new_layer  = matrix.arr + time_layer * matrix.nx;
-        double *prev_layer = matrix.arr + (time_layer - 1) * matrix.nx;
 
-        for (int x_pos = 1; x_pos < problem.nx; ++x_pos) {
-            if (rank == main_rank) {
-                new_layer[0] = problem.u1(problem.x0 + problem.tau * time_layer);
-            } else {
-                RET_IF_ERR(
-                    MPI_Recv(
-                        new_layer, 1, MPI_DOUBLE, 
-                        rank - 1, TAG_EDGE,
-                        MPI_COMM_WORLD, MPI_STATUS_IGNORE
-                    )
-                );
+
+    const int batch_size = 10;
+    assert(problem.nt % batch_size == 0);
+
+    double *edje_buf = (double*) malloc(batch_size * sizeof(double));
+    // for (int time_layer = 1; time_layer < problem.nt; ++time_layer) {
+    for (int buffer_number = 0; buffer_number < problem.nt / batch_size; ++buffer_number) {
+        int buffer_size = matrix.nx * batch_size;
+        double *buffer = matrix.arr + buffer_number * buffer_size;
+
+        if (rank == main_rank) {
+            // new_layer[0] = problem.u1(problem.x0 + problem.tau * time_layer);
+            for (int q = 0; q < batch_size; ++q) {
+                edje_buf[q] = problem.u1(problem.x0 + problem.tau * (buffer_number*buffer_size + q));
             }
-            new_layer[x_pos] = calc_next_elem(
-                new_layer[x_pos - 1], 
-                prev_layer[x_pos - 1], 
-                prev_layer[x_pos], 
-                problem.a,
-                problem.f(
-                    problem.x0 + x_pos*problem.h,
-                    problem.t0 + time_layer*problem.tau
-                ), 
-                problem.tau, problem.h
+        } else {
+            RET_IF_ERR(
+                MPI_Recv(
+                    edje_buf, batch_size, MPI_DOUBLE, 
+                    rank - 1, TAG_EDGE,
+                    MPI_COMM_WORLD, MPI_STATUS_IGNORE
+                )
             );
-            if (rank + 1 != size) {
-                RET_IF_ERR(
-                    MPI_Send(
-                        new_layer + problem.nx - 1, 1, MPI_DOUBLE, 
-                        rank + 1, TAG_EDGE, 
-                        MPI_COMM_WORLD
-                    )
+        }
+        for (int q = 0; q < batch_size; ++q) {
+            // matrix.arr[buffer_number*batch_size + q*matrix.nx] = edje_buf[q];
+            buffer[q*matrix.nx] = edje_buf[q];
+        }
+        // for (int time_layer = buffer_number*batch_size + 1; time_layer < buffer_number*(batch_size + 1) + (buffer_number + 1 == problem.nt / batch_size ? 1 : 2); ++time_layer) {
+        for (int time_layer = 1; time_layer < batch_size + (buffer_number + 1 != problem.nt / batch_size); ++time_layer) {
+            double *new_layer  = buffer + time_layer * matrix.nx;
+            double *prev_layer = buffer + (time_layer - 1) * matrix.nx;
+            for (int x_pos = 1; x_pos < problem.nx; ++x_pos) {
+                new_layer[x_pos] = calc_next_elem(
+                    new_layer[x_pos - 1], 
+                    prev_layer[x_pos - 1], 
+                    prev_layer[x_pos], 
+                    problem.a,
+                    problem.f(
+                        problem.x0 + x_pos*problem.h,
+                        problem.t0 + (buffer_number*batch_size + time_layer)*problem.tau
+                    ),
+                    problem.tau, problem.h
                 );
             }
         }
+        if (rank + 1 != size) {
+            for (int q = 0; q < batch_size; ++q) {
+                // edje_buf[q] = *(buffer + matrix.nx*(q+1) - 1);
+                edje_buf[q] = buffer[matrix.nx*(q+1) - 1];
+            }
+            RET_IF_ERR(
+                MPI_Send(
+                    // new_layer + problem.nx - 1, 1, MPI_DOUBLE, 
+                    edje_buf, batch_size, MPI_DOUBLE, 
+                    rank + 1, TAG_EDGE, 
+                    MPI_COMM_WORLD
+                )
+            );
+        }
     }
+    free(edje_buf);
 
     // sync_call(
     //     printf("rank %d\n", rank);
