@@ -1,9 +1,9 @@
-#include <assert.h>
 #include <mpi.h>
+#include <time.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <math.h>
 #include "../slibs/err_proc.h"
 
 // ------------------------------------------------------------------------
@@ -286,7 +286,7 @@ void calc_local_problem(
     free(edje_buf);
 }
 
-void calc(
+Matrix calc(
     Problem problem,
     int rank,
     int size
@@ -294,18 +294,14 @@ void calc(
     check(problem.nx % size == 0);
     calc_proc_problem(&problem, rank, size);
     Matrix matrix = matrix_init(problem.nx, problem.nt);
+
     calc_first_layer(&matrix, &problem);
-
     calc_local_problem(&matrix, &problem, rank, size);
-
     Matrix result = gather_matrixes(&matrix, rank, size);
-    if (rank == main_rank) {
-        FILE *file = fopen("output/calc.txt", "w");
-        matrix_dump(&result, file);
-        fclose(file);
-    }
-    matrix_dstr(&result);
+    
     matrix_dstr(&matrix);
+
+    return result;
 }
 
 // ------------------------------------------------------------------- main
@@ -339,7 +335,19 @@ int main(int argc, char **argv) {
         1, f, u0, u1
     );
 
-    calc(problem, rank, size);
+    clock_t start, end;
+    start = clock();
+    Matrix result = calc(problem, rank, size);
+    end = clock();
+    double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
+    rprint("time spent: %f", delta_time);
+
+    if (rank == main_rank) {
+        FILE *file = fopen("output/calc.txt", "w");
+        matrix_dump(&result, file);
+        fclose(file);
+    }
+    matrix_dstr(&result);
 
     MPI_Finalize();
 
