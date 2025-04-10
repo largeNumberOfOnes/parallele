@@ -123,6 +123,8 @@ static inline void rprint_arr(int *arr, int count) {
     free(str);
 }
 
+#define LOG(what_to_do) what_to_do
+
 #define DOT printf("\033[95mDOT from line: %d\033[39m\n", __LINE__);
 #define DOTR {                                                            \
     MPI_Barrier(MPI_COMM_WORLD);                                          \

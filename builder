@@ -123,9 +123,9 @@ def mpi_compile_task(args: argparse.Namespace) -> None:
 
     task = Task(args.task)
 
-    os.system('{} {} {} -o {}'.format(
+    os.system('{} {} {} -lm -o {}'.format(
             'mpic++' if task.is_cpp_file() else 'mpicc',
-            '-g',
+            '-g -Wall -Wextra -Wpedantic' +  ' '.join(args.flags) if args.flags is not None else ' ',
             # '-g -fsanitize=address',
             task.get_path(),
             task.get_exec_path()
@@ -322,6 +322,7 @@ def parse_args() -> None:
     )
     subparser.add_argument('task', type=str, help='Full name of the task or task number')
     subparser.add_argument('-np', type=int, default=1, help='Number of processes')
+    subparser.add_argument('--flags', nargs='+', help='Set flags for the compiler')
     subparser.add_argument('--args', nargs='+', help='Set args for the compiler')
     subparser.set_defaults(func=mpi_comp_and_run)
 
