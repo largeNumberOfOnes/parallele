@@ -1,3 +1,7 @@
+/**
+ * Solving the transfer equation using the rectangle method.
+ */
+
 #include <mpi.h>
 #include <time.h>
 #include <math.h>
