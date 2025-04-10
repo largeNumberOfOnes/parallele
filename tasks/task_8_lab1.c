@@ -6,12 +6,12 @@
 #include <math.h>
 #include "../slibs/err_proc.h"
 
-
+// ------------------------------------------------------------------------
 
 const int main_rank = 0;
 const int TAG_EDGE  = 1;
 
-// ---------------------------------------------------------- Proble struct
+// ------------------------------------------------------------------------
 
 void print_arr(double *arr, int count) {
     check(arr);
@@ -23,7 +23,7 @@ void print_arr(double *arr, int count) {
     printf("%f\n", arr[count - 1]);
 }
 
-// ---------------------------------------------------------- Proble struct
+// --------------------------------------------------------- Problem struct
 
 typedef struct Problem_t {
     double x0; double x1; int nx;
@@ -77,7 +77,7 @@ void problem_dump(Problem *problem) {
     );    
 }
 
-// ------------------------------------------------------------------------
+// ---------------------------------------------------------- Matrix struct
 
 typedef struct Matrix_t {
     double *arr;
@@ -100,20 +100,10 @@ void matrix_dstr(Matrix *matrix) {
     matrix->arr = NULL;
 }
 
-static inline double matrix_get_elem(Matrix *matrix, int layer, int elem_number) {
-    return matrix->arr[layer*(matrix->nx) + elem_number];
-}
-
-static inline void matrix_set_elem(Matrix *matrix, int layer, int elem_number,
-                                                            double elem) {
-    matrix->arr[layer*(matrix->nx) + elem_number] = elem;
-}
-
 void matrix_dump(Matrix *matrix, FILE *file) {
-    printf("nt: %d\n", matrix->nt);
     for (int q = 0; q < matrix->nt; ++q) {
         for (int w = 0; w < matrix->nx; ++w) {
-            fprintf(file, "%f, ", matrix_get_elem(matrix, q, w));
+            fprintf(file, "%f, ", matrix->arr[q*matrix->nx + w]);
         }
         fprintf(file, "\n");
     }
@@ -143,10 +133,7 @@ static inline double calc_next_elem(
 
 void calc_first_layer(Matrix *matrix, Problem *problem) {
     for (int q = 0; q < problem->nx; ++q) {
-        matrix_set_elem(
-            matrix, 0, q,
-            problem->u0(problem->x0 + q*(problem->tau))
-        );
+        matrix->arr[q] = problem->u0(problem->x0 + q*problem->tau);
     }
 }
 
@@ -254,15 +241,49 @@ void calc_batch(
     double buf_start_t,
     int calc_next_layer
 ) {
-    // int calc_next_layer = buffer_number + 1 != problem.nt / batch_size;
-    for (int time_layer = 1; time_layer < buf_h + calc_next_layer; ++time_layer) {
+    for (int tlayer = 1; tlayer < buf_h + calc_next_layer; ++tlayer) {
         calc_layer(
             problem, 
-            buf + time_layer * buf_w,
-            buf + (time_layer - 1) * buf_w,
-            buf_start_t + time_layer*problem->tau
+            buf + tlayer * buf_w,
+            buf + (tlayer - 1) * buf_w,
+            buf_start_t + tlayer*problem->tau
         );
     }
+}
+
+void calc_local_problem(
+    Matrix *matrix,
+    Problem *problem,
+    int rank,
+    int size
+) {
+    int nt = problem->nt;
+    int nx = problem->nx;
+
+    const int batch_size = 10;
+    check(nt % batch_size == 0);
+
+    double *edje_buf = (double*) malloc(batch_size * sizeof(double));
+    for (int buffer_num = 0; buffer_num < nt / batch_size; ++buffer_num) {
+        int buffer_size = nx * batch_size;
+        double *buffer = matrix->arr + buffer_num * buffer_size;
+        double buf_start_t = problem->t0 +
+                                        buffer_num*batch_size*problem->tau;
+        recv_edge(
+            buffer, nx, batch_size,
+            edje_buf,
+            problem, buf_start_t,
+            rank, size
+        );
+        calc_batch(
+            buffer, nx, batch_size, 
+            problem,
+            buf_start_t,
+            buffer_num + 1 != nt / batch_size
+        );
+        send_edge(buffer, nx, batch_size, edje_buf, rank, size);
+    }
+    free(edje_buf);
 }
 
 void calc(
@@ -270,54 +291,13 @@ void calc(
     int rank,
     int size
 ) {
-    // calc_x_range(&x0, &x1, &nx, rank, size);
+    check(problem.nx % size == 0);
     calc_proc_problem(&problem, rank, size);
-    // rprint("x0 = %f, x1 = %f, nx = %d", x0, x1, nx);
-    LOG(problem_dump(&problem));
-
     Matrix matrix = matrix_init(problem.nx, problem.nt);
-
     calc_first_layer(&matrix, &problem);
 
-    LOG(
-        printf("First layer\n");
-        print_arr(matrix.arr, matrix.nx);
-    )
+    calc_local_problem(&matrix, &problem, rank, size);
 
-
-    const int batch_size = 10;
-    assert(problem.nt % batch_size == 0);
-
-    double *edje_buf = (double*) malloc(batch_size * sizeof(double));
-    for (int buffer_number = 0; buffer_number < problem.nt / batch_size; ++buffer_number) {
-        int buffer_size = matrix.nx * batch_size;
-        double *buffer = matrix.arr + buffer_number * buffer_size;
-
-        recv_edge(
-            buffer, matrix.nx, batch_size,
-            edje_buf,
-            &problem, problem.t0 + (buffer_number*batch_size)*problem.tau,
-            rank, size
-        );
-        calc_batch(
-            buffer, matrix.nx, batch_size, 
-            &problem,
-            problem.t0 + buffer_number*batch_size*problem.tau,
-            buffer_number + 1 != problem.nt / batch_size
-        );
-        send_edge(buffer, matrix.nx, batch_size, edje_buf, rank, size);
-    }
-    free(edje_buf);
-
-    // sync_call(
-    //     printf("rank %d\n", rank);
-    //     for (int time_layer = 0; time_layer < problem.nt; ++time_layer) {
-    //         print_arr(matrix.arr + time_layer*matrix.nx, matrix.nx);
-    //     }
-    //     printf("\n");
-    // )
-
-    // Matrix result = matrix;
     Matrix result = gather_matrixes(&matrix, rank, size);
     if (rank == main_rank) {
         FILE *file = fopen("output/calc.txt", "w");
@@ -325,7 +305,6 @@ void calc(
         fclose(file);
     }
     matrix_dstr(&result);
-
     matrix_dstr(&matrix);
 }
 
@@ -336,7 +315,11 @@ double f(double x, double t) {
 }
 
 double u0(double x) {
-    return 10*sin(18*x);
+    if (M_PI / 9 < x && x < M_PI / 6) {
+        return 10*sin(18*x);
+    } else {
+        return 0;
+    }
 }
 
 double u1(double t) {
@@ -351,16 +334,12 @@ int main(int argc, char **argv) {
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
 
     Problem problem = problem_init(
-        0, 1, 100,
-        0, 1, 100,
+        0, 1, 1000,
+        0, 1, 1000,
         1, f, u0, u1
     );
-    check(problem.nx % size == 0);
 
-    calc(
-        problem,
-        rank, size
-    );
+    calc(problem, rank, size);
 
     MPI_Finalize();
 

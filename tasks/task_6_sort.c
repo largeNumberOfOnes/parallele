@@ -652,8 +652,10 @@ void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
     for (int q = 1; q < max; q += max/points_count) {
         int count =  q * (mode == MODE_EXEC_SAMPLE ? size : 1);
         int *arr = NULL;
+        int *buf = NULL;
         if (rank == main_rank) {
             arr = generate_random_array(count, INT_MAX, 7);
+            buf = (int*) malloc(count * sizeof(int));
         }
         RET_IF_ERR(MPI_Barrier(MPI_COMM_WORLD));
         
@@ -670,7 +672,7 @@ void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
                 if (rank == main_rank) { quicksort(arr, 0, count - 1); }
                 break;
             case MODE_EXEC_RADIX:  
-                if (rank == main_rank) { radixsort(arr, count); }
+                if (rank == main_rank) { radixsort(arr, buf, count); }
                 break;
             case MODE_EXEC_SAMPLE:
                 samplesort(arr, count, rank, size);
@@ -682,9 +684,10 @@ void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
             end = clock();
             double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
             // printf("time: %f on %d elements\n", delta_time, count);
-            printf("(%f, %d),\n", delta_time, count);
+            printf("    (%f, %d),\n", delta_time, count);
             // printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
             free(arr);
+            free(buf);
         }
     }
 }
