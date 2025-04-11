@@ -1,12 +1,16 @@
 /**
- * RUN: ./prog <mode> <count_per_proc>
+ * Different realisation of sort algorithms.
+ * RUN: ./prog <mode> <sort_type> <count_per_proc>
  * mode - One of the following:
- *        1 - run heapsort tim(N) dependence
- *        2 - run quicksort tim(N) dependence
- *        3 - run samplesort tim(N) dependence
- *        4 - run heapsort test
- *        5 - run quicksort test
- *        6 - run samplesort test
+ *        MODE_EXEC = 1,
+ *        MODE_CHECK = 2,
+ * sort_type -
+ *        SORTYPE_HEAP = 1,
+ *        SORTYPE_QUICK = 2,
+ *        SORTYPE_RADIX = 3,
+ *        SORTYPE_BINRADIX = 4,
+ *        SORTYPE_SAMPLE = 5,
+ *        SORTYPE_COMB = 6,
  */
 
 #include "mpi.h"
@@ -130,7 +134,7 @@ void quicksort(int *arr, int l, int r) {
     }
 }
 
-// ------------------------------------------------------------- radix_sort
+// -------------------------------------------------------------- radixsort
 
 int getMax(int arr[], int n) {
     int max = arr[0];
@@ -140,7 +144,7 @@ int getMax(int arr[], int n) {
     return max;
 }
 
-void countingSort(int arr[], int *output, int n, int exp) {
+void countingSort(int arr[], int *buf, int n, int exp) {
     int count[10] = {0};
     for (int i = 0; i < n; i++) {
         count[(arr[i] / exp) % 10]++;
@@ -149,19 +153,46 @@ void countingSort(int arr[], int *output, int n, int exp) {
         count[i] += count[i - 1];
     }
     for (int i = n - 1; i >= 0; i--) {
-        output[count[(arr[i] / exp) % 10] - 1] = arr[i];
+        buf[count[(arr[i] / exp) % 10] - 1] = arr[i];
         count[(arr[i] / exp) % 10]--;
     }
-}
-
-void radixsort(int arr[], int *output, int n) {
-    int max = getMax(arr, n);
-    for (int exp = 1; max / exp > 0; exp *= 10) {
-        countingSort(arr, output, n, exp);
+    for (int q = 0; q < n; q++) {
+        arr[q] = buf[q];
     }
 }
 
-// ------------------------------------------------------------ sample_sort
+void radixsort(int arr[], int *buf, int n) {
+    int max = getMax(arr, n);
+    for (int exp = 1; max / exp > 0; exp *= 10) {
+        countingSort(arr, buf, n, exp);
+    }
+}
+
+void countingSort_bin(int arr[], int *buf, int n, int exp) {
+    int count[16] = {0};
+    for (int i = 0; i < n; i++) {
+        count[(arr[i] >> exp) & 0xF]++;
+    }
+    for (int i = 1; i < 16; i++) {
+        count[i] += count[i - 1];
+    }
+    for (int i = n - 1; i >= 0; i--) {
+        buf[count[(arr[i] >> exp) % 16] - 1] = arr[i];
+        count[(arr[i] >> exp) & 0xF]--;
+    }
+    for (int q = 0; q < n; q++) {
+        arr[q] = buf[q];
+    }
+}
+
+void radixsort_bin(int arr[], int *buf, int n) {
+    int max = getMax(arr, n);
+    for (int exp = 0; max > 0; exp += 4, max >>= 4) {
+        countingSort_bin(arr, buf, n, exp);
+    }
+}
+
+// ------------------------------------------------------------- samplesort
 
 static void calc_splitters(
     int *self_arr,
@@ -537,7 +568,10 @@ void samplesort_alg(int *arr, int count, int rank, int size) {
         )
     );
 
-    quicksort(self_arr, 0, self_count-1);
+    // quicksort(self_arr, 0, self_count-1);
+    int *help_arr = (int*) malloc(count * sizeof(int));
+    radixsort_bin(self_arr, help_arr, self_count);
+    free(help_arr);
 
     int *count_arr = (int*) malloc(size * sizeof(int));
     separate_on_backets(
@@ -611,7 +645,7 @@ void combinedsort(int *arr, int count, int rank, int size) {
     check(size > 1);
     check(count % size == 0);
 
-    int switch_count = 300;
+    int switch_count = 1500;
     if (count < switch_count) {
         if (rank == main_rank) {
             quicksort(arr, 0, count - 1);
@@ -623,34 +657,78 @@ void combinedsort(int *arr, int count, int rank, int size) {
 
 // ------------------------------------------------------------------------
 
+typedef enum SortType_t {
+    SORTYPE_HEAP = 1,
+    SORTYPE_QUICK,
+    SORTYPE_RADIX,
+    SORTYPE_BINRADIX,
+    SORTYPE_SAMPLE,
+    SORTYPE_COMB,
+} SortType;
+
 typedef enum Mode_t {
-    MODE_EXEC_HEAP = 1,
-    MODE_EXEC_QUICK,
-    MODE_EXEC_RADIX,
-    MODE_EXEC_SAMPLE,
-    MODE_CHECK_HEAP,
-    MODE_CHECK_QUICK,
-    MODE_CHECK_RADIX,
-    MODE_CHECK_SAMPLE,
+    MODE_EXEC = 1,
+    MODE_CHECK,
 } Mode;
 
-int is_mode_correct(Mode mode) {
-    return 0 < mode && mode < 9;
+const char *sort_type_to_str(SortType sort_type) {
+    switch (sort_type) {
+        case SORTYPE_HEAP:     return "heapsort";
+        case SORTYPE_QUICK:    return "quicksort";
+        case SORTYPE_RADIX:    return "radixsort";
+        case SORTYPE_BINRADIX: return "bin_radixsort";
+        case SORTYPE_SAMPLE:   return "samplesort";
+        case SORTYPE_COMB:     return "combinedsort";
+        default: check_ames(0, "Incorect mode");
+    }
+    return "Unreachable";
 }
 
-int is_mode_exec(Mode mode) {
-    return 0 < mode && mode < 5;
+int use_proc(SortType sort_type) {
+    return sort_type == SORTYPE_SAMPLE || sort_type == SORTYPE_COMB;
 }
 
-int is_mode_check(Mode mode) {
-    return 4 < mode && mode < 9;
+void sort_with_mode(
+    int *arr,
+    int count,
+    int *buf,
+    SortType sort_type,
+    int rank,
+    int size
+) {
+    switch (sort_type) {
+        case SORTYPE_HEAP:
+            if (rank == main_rank) { heapsort(arr, count); }
+            break;
+        case SORTYPE_QUICK:  
+            if (rank == main_rank) { quicksort(arr, 0, count - 1); }
+            break;
+        case SORTYPE_RADIX:  
+            if (rank == main_rank) { radixsort(arr, buf, count); }
+            break;
+        case SORTYPE_BINRADIX:  
+            if (rank == main_rank) { radixsort_bin(arr, buf, count); }
+            break;
+        case SORTYPE_SAMPLE:
+            samplesort(arr, count, rank, size);
+            break;
+        case SORTYPE_COMB:
+            combinedsort(arr, count, rank, size);
+            break;
+        default: check_ames(0, "Incorect mode");
+    }
 }
 
-void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
+void test_exec_time(
+    SortType sort_type,
+    int count_per_proc,
+    int rank,
+    int size
+) {
     int max = count_per_proc;
     int points_count = 100;
     for (int q = 1; q < max; q += max/points_count) {
-        int count =  q * (mode == MODE_EXEC_SAMPLE ? size : 1);
+        int count =  q * (use_proc(sort_type) ? size : 1);
         int *arr = NULL;
         int *buf = NULL;
         if (rank == main_rank) {
@@ -664,75 +742,41 @@ void test_exec_time(Mode mode, int count_per_proc, int rank, int size) {
             start = clock();
         }
 
-        switch (mode) {
-            case MODE_EXEC_HEAP:
-                if (rank == main_rank) { heapsort(arr, count); }
-                break;
-            case MODE_EXEC_QUICK:  
-                if (rank == main_rank) { quicksort(arr, 0, count - 1); }
-                break;
-            case MODE_EXEC_RADIX:  
-                if (rank == main_rank) { radixsort(arr, buf, count); }
-                break;
-            case MODE_EXEC_SAMPLE:
-                samplesort(arr, count, rank, size);
-                break;
-            default: check_ames(0, "Incorect mode");
-        }
+        sort_with_mode(arr, count, buf, sort_type, rank, size);
 
         if (rank == 0) {
             end = clock();
             double delta_time = (double)(end - start) / CLOCKS_PER_SEC;
-            // printf("time: %f on %d elements\n", delta_time, count);
-            printf("    (%f, %d),\n", delta_time, count);
-            // printf("correct: %s\n", check_arr(arr, count) ? "true" : "false");
+            printf("time: %f on %d elements\n", delta_time, count);
             free(arr);
             free(buf);
         }
     }
 }
 
-void wrapper_heapsort(int *arr, int count, int rank, int size) {
-    heapsort(arr, count);
-}
-
-void wrapper_quicksort(int *arr, int count, int rank, int size) {
-    quicksort(arr, 0, count - 1);
-}
-
-void wrapper_samplesort(int *arr, int count, int rank, int size) {
-    samplesort(arr, count, rank, size);
-}
-
-void test_correctness(Mode mode, int count_per_proc, int rank, int size) {
+void test_correctness(
+    SortType sort_type,
+    int count_per_proc,
+    int rank,
+    int size
+) {
     clock_t start, end;
     int count = count_per_proc*size;
     int *arr = NULL;
     int *buf = NULL;
     if (rank == main_rank) {
-        printf("Sorting random array of len %d\n", count);
+        printf(
+            "Sorting random array of len %d with %s%d\n",
+            count,
+            sort_type_to_str(sort_type),
+            use_proc(sort_type) ? size : 1
+        );
         arr = generate_random_array(count, 1000, 7);
         buf = (int*) malloc(count * sizeof(int));
-        // arr = (int*) malloc(count * sizeof(int));
-        // for (int q = 0; q < count; ++q) { arr[q] = 7; }
         start = clock();
     }
 
-    switch (mode) {
-        case MODE_CHECK_HEAP:
-            if (rank == main_rank) { heapsort(arr, count); }
-            break;
-        case MODE_CHECK_QUICK:  
-            if (rank == main_rank) { quicksort(arr, 0, count - 1); }
-            break;
-        case MODE_CHECK_RADIX:  
-            if (rank == main_rank) { radixsort(arr, buf, count); }
-            break;
-        case MODE_CHECK_SAMPLE:
-            samplesort(arr, count, rank, size);
-            break;
-        default: check_ames(0, "Incorect mode");
-    }
+    sort_with_mode(arr, count, buf, sort_type, rank, size);
 
     if (rank == main_rank) {
         end = clock();
@@ -748,6 +792,7 @@ void parse_params(
     int argc,
     char **argv,
     Mode *ret_mode,
+    SortType *ret_sort_type,
     int *ret_count_per_proc
 ) {
     int rank, size;
@@ -759,17 +804,18 @@ void parse_params(
         "You should specify more than 1 proc for this program!"
     );
     check_ames(
-        argc == 3,
-        "You should specify 2 arguments: mode and count_per_proc"
+        argc == 4,
+        "You should specify 3 arguments: mode, sort type "
+                                                    "and count_per_proc"
     );
 
-    Mode mode = atoi(argv[1]);
-    int count_per_proc = atoi(argv[2]);
-    check_ames(is_mode_correct(mode), "Mode must be int in range [1, 6]");
-    check_ames(0 < count_per_proc, "count_per_proc must be positive int");
-
-    *ret_mode = mode;
-    *ret_count_per_proc = count_per_proc;
+    *ret_mode = atoi(argv[1]);
+    *ret_sort_type = atoi(argv[2]);
+    *ret_count_per_proc = atoi(argv[3]);
+    check_ames(0 < *ret_mode, "Mode must be positive integer");
+    check_ames(0 < *ret_sort_type, "Sort type must be positive integer");
+    check_ames(0 < *ret_count_per_proc,
+                                "count_per_proc must be positive int");
 }
 
 // ------------------------------------------------------------------- main
@@ -782,22 +828,20 @@ int main(int argc, char **argv) {
     RET_IF_ERR(MPI_Comm_size(MPI_COMM_WORLD, &size));
     
     Mode mode = 0;
+    SortType sort_type = 0;
     int count_per_proc = 0;
-    parse_params(argc, argv, &mode, &count_per_proc);
+    parse_params(argc, argv, &mode, &sort_type, &count_per_proc);
 
-    if (is_mode_exec(mode)) {
-        test_exec_time(mode, count_per_proc, rank, size);
-    } else if (is_mode_check(mode)) {
-        test_correctness(mode, count_per_proc, rank, size);
-    } else {
-        check_ames(0, "Unknown mode");
+    switch (mode) {
+        case MODE_EXEC:
+            test_exec_time(sort_type, count_per_proc, rank, size);
+            break;
+        case MODE_CHECK:
+            test_correctness(sort_type, count_per_proc, rank, size);
+            break;
+        default:
+            check_ames(0, "Unknown mode");
     }
-
-    // if (rank == main_rank) {
-    //     int *arr = generate_random_array(100, 1000, 7);
-    //     // print_arr(arr, 100);
-    //     radixsort(arr, 100);
-    // }
 
     MPI_Finalize();
 
