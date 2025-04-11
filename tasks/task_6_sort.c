@@ -771,7 +771,7 @@ void test_correctness(
             sort_type_to_str(sort_type),
             use_proc(sort_type) ? size : 1
         );
-        arr = generate_random_array(count, 1000, 7);
+        arr = generate_random_array(count, INT_MAX, 7);
         buf = (int*) malloc(count * sizeof(int));
         start = clock();
     }
