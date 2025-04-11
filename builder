@@ -125,8 +125,8 @@ def mpi_compile_task(args: argparse.Namespace) -> None:
 
     os.system('{} {} {} -lm -o {}'.format(
             'mpic++' if task.is_cpp_file() else 'mpicc',
-            '-g -Wall -Wextra -Wpedantic' +  ' '.join(args.flags) if args.flags is not None else ' ',
-            # '-g -fsanitize=address',
+            # '-g -Wall -Wextra -Wpedantic' +  ' '.join(args.flags) if args.flags is not None else ' ',
+            '-O3',
             task.get_path(),
             task.get_exec_path()
         )
