@@ -69,7 +69,19 @@ typedef struct Game_t {
     void (*exchenge_time) (Time *time, const Index *index);
 } Game;
 
-void draw_glider(cell *grid, int w, int h) {
+void draw_glider(cell *grid, int w, int h, int x, int y) {
+    #define SET(x, y) grid[(x) * h + (y)] = CELL_ALIVE;
+
+    SET(x + 0, y + 1);
+    SET(x + 1, y + 2);
+    SET(x + 2, y + 0);
+    SET(x + 2, y + 1);
+    SET(x + 2, y + 2);
+
+    #undef SET
+}
+
+void draw_lwss(cell *grid, int w, int h) {
     #define SET(x, y) grid[x * h + y] = CELL_ALIVE;
 
     SET(2, 2);
@@ -104,7 +116,8 @@ Game game_init(
         }
     }
     if (index.rank == 0) {
-        draw_glider(grid, w, h);
+        draw_lwss(grid, w, h);
+        // draw_glider(grid, w, h, 2, 2);
     }
     return (Game) {
         .w = w,
@@ -198,7 +211,7 @@ static void evalute(Game *game) {
         }
     }
     int skip_left  = 0;
-    int skip_right = 0;
+    int skip_right = game->w - 2;
     int is_skip_left_blocked = 0;
     for (int x = 1; x + 1 < game->w; ++x) {
         int is_all_dead = 1;
@@ -246,11 +259,12 @@ void game_start_game_loop(Game *game) {
             .buffer_size = game->h
         };
         game->exchange_edge(&message, &game->index);
+        usleep(100000);
         game->print(game, &game->index);
         // game->end_time(&time);
         // game->exchenge_time(&time);
-        DOT
         usleep(100000);
+        if (game->index.rank == 0) { DOT }
     }
 }
 
@@ -263,10 +277,36 @@ typedef struct Comm_t {
     int send_right;
 } Comm;
 
+static void comm_timer_step(Comm *comm) {
+    if (comm->recv_left  > 0) { --comm->recv_left;  }
+    if (comm->send_left  > 0) { --comm->send_left;  }
+    if (comm->recv_right > 0) { --comm->recv_right; }
+    if (comm->send_right > 0) { --comm->send_right; }
+
+    if (comm->recv_left == 0) { comm->send_left = 0; }
+    if (comm->send_left == 0) { comm->recv_left = 0; }
+
+    if (comm->recv_right == 0) { comm->send_right = 0; }
+    if (comm->send_right == 0) { comm->recv_right = 0; }
+}
+
+static void comm_set_new_val(Comm *comm, Message *message, int skips[2]) {
+    #define MAX(x, y) ((x) > (y)) ? (x) : (y)
+    if (comm->recv_left  == 0) { comm->recv_left  = MAX(skips[0]            - 1, 0); }
+    if (comm->send_left  == 0) { comm->send_left  = MAX(message->skip_left  - 1, 0); }
+    if (comm->recv_right == 0) { comm->recv_right = MAX(skips[1]            - 1, 0); }
+    if (comm->send_right == 0) { comm->send_right = MAX(message->skip_right - 1, 0); }
+    // comm->recv_left =  (comm->recv_left  < 0) ? 0 : comm->recv_left;
+    // comm->send_left =  (comm->send_left  < 0) ? 0 : comm->send_left;
+    // comm->recv_right = (comm->recv_right < 0) ? 0 : comm->recv_right;
+    // comm->send_right = (comm->send_right < 0) ? 0 : comm->send_right;
+    #undef MAX
+}
+
 static void first_stage(
     Message *message,
     cell *temp,
-    Comm *comm,
+    const Comm *comm,
     int rank,
     int size
 ) {
@@ -284,7 +324,7 @@ static void first_stage(
                 )
             );
         }
-        if (!comm->send_right) {
+        if (!comm->recv_right) {
             RET_IF_ERR(
                 MPI_Recv(
                     temp, count, MPI_CHAR, 
@@ -319,7 +359,7 @@ static void first_stage(
 static void second_stage(
     Message *message,
     cell *temp,
-    Comm *comm,
+    const Comm *comm,
     int rank,
     int size
 ) {
@@ -329,15 +369,15 @@ static void second_stage(
     cell *left_near  = message->left_near;
     int count = message->buffer_size;
     if (rank % 2 == 0 && rank != 0) {
-        // if (!comm->send_left) {
+        if (!comm->send_left) {
             RET_IF_ERR(
                 MPI_Send(
                     left_near, count, MPI_CHAR,
                     rank - 1, TAG_EDGE, MPI_COMM_WORLD
                 )
             );
-        // }
-        // if (!comm->recv_left) {
+        }
+        if (!comm->recv_left) {
             RET_IF_ERR(
                 MPI_Recv(
                     temp, count, MPI_CHAR, 
@@ -346,9 +386,9 @@ static void second_stage(
                 )
             );
             memcpy(left_far, temp, count*sizeof(cell));
-        // }
+        }
     } else if (rank % 2 == 1 && rank + 1 != size) {
-        // if (!comm->recv_right) {
+        if (!comm->recv_right) {
             RET_IF_ERR(
                 MPI_Recv(
                     temp, count, MPI_CHAR, 
@@ -357,22 +397,22 @@ static void second_stage(
                 )
             );
             memcpy(right_far, temp, count*sizeof(cell));
-        // }
-        // if (!comm->send_right) {
+        }
+        if (!comm->send_right) {
             RET_IF_ERR(
                 MPI_Send(
                     right_near, count, MPI_CHAR,
                     rank + 1, TAG_EDGE, MPI_COMM_WORLD
                 )
             );
-        // }
+        }
     }
 }
 
 static void third_stage(
     Message *message,
     cell *temp,
-    Comm *comm,
+    const Comm *comm,
     int rank,
     int size
 ) {
@@ -387,15 +427,15 @@ static void third_stage(
         return;
     }
     if (rank == 0) {
-        // if (!comm->send_left) {
+        if (!comm->send_left) {
             RET_IF_ERR(
                 MPI_Send(
                     left_near, count, MPI_CHAR,
                     size - 1, TAG_EDGE, MPI_COMM_WORLD
                 )
             );
-        // }
-        // if (!comm->recv_left) {
+        }
+        if (!comm->recv_left) {
             RET_IF_ERR(
                 MPI_Recv(
                     temp, count, MPI_CHAR, 
@@ -404,9 +444,9 @@ static void third_stage(
                 )
             );
             memcpy(left_far, temp, count*sizeof(cell));
-        // }
+        }
     } else if (rank + 1 == size) {
-        // if (!comm->recv_right) {
+        if (!comm->recv_right) {
             RET_IF_ERR(
                 MPI_Recv(
                     temp, count, MPI_CHAR, 
@@ -415,15 +455,15 @@ static void third_stage(
                 )
             );
             memcpy(right_far, temp, count*sizeof(cell));
-        // }
-        // if (!comm->recv_right) {
+        }
+        if (!comm->send_right) {
             RET_IF_ERR(
                 MPI_Send(
                     right_near, count, MPI_CHAR,
                     0, TAG_EDGE, MPI_COMM_WORLD
                 )
             );
-        // }
+        }
     }
 }
 
@@ -473,14 +513,14 @@ void exchange_edge_mpi (Message *message, const Index *index) {
     int rank = index->rank;
     int size = index->rank_count;
     cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
-    static Comm comm = {
+    static Comm comm =  {
         .recv_left  = 0,
         .send_left  = 0,
         .recv_right = 0,
         .send_right = 0
     };
+    // printf("%d -> %d ", rank, comm.recv_left); printf("%d ", comm.send_left); printf("%d ", comm.recv_right); printf("%d\n", comm.send_right);
     // for (int q = 0; q < 10; ++q) { printf("%d ", message->left_near[q]); } printf("\n");
-    
     // printf("rank: %d -> (%d, %d)\n", index->rank, message->skip_left, message->skip_right);
     code_skip(message);
     first_stage(message, temp_buffer, &comm, rank, size);
@@ -488,13 +528,16 @@ void exchange_edge_mpi (Message *message, const Index *index) {
     third_stage(message, temp_buffer, &comm, rank, size);
     int skips[2];
     decode_skip(message, skips);
+    // printf("%d -> mes  : %d %d\n", rank, message->skip_left, message->skip_right);
+    // printf("%d -> skips: %d %d\n", rank, skips[0], skips[1]);
 
-    // comm = (Comm) {
-    //     .recv_left  = skips[0],
-    //     .send_left  = message->skip_left,
-    //     .recv_right = skips[1],
-    //     .send_right = message->skip_right
-    // };
+    
+    comm_set_new_val(&comm, message, skips);
+    comm_timer_step(&comm);
+    // printf("%d -> %d ", rank, comm.recv_left);
+    // printf("%d ", comm.send_left);
+    // printf("%d ", comm.recv_right);
+    // printf("%d\n", comm.send_right);
     // printf("rank: %d -> (%d, %d)\n", index->rank, skips[0], skips[1]);
 
     free(temp_buffer);
@@ -531,12 +574,19 @@ void print_mpi(const struct Game_t *game, const Index *index) {
         for (int y = 0; y < game->h; ++y) {
             for (int proc = 0; proc < index->rank_count; ++proc) {
                 for (int x = 1; x + 1 < game->w; ++x) {
+                // for (int x = 0; x < game->w; ++x) {
                     if ((buffer + grid_size*proc)[x * game->h + y]) {
                         printf("#");
                     } else {
-                        printf("_");
+                        if (x == 1 || x == game->w - 2) {
+                            // printf("'");
+                            printf("_");
+                        } else {
+                            printf("_");
+                        }
                     }
                 }
+                // printf(" ");
             }
             printf("\n");
         }
