@@ -1,3 +1,5 @@
+#include <assert.h>
+#include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -18,7 +20,8 @@ const cell CELL_DYING   = 2;
 const cell CELL_NEWBORN = 3;
 
 typedef struct Message_t {
-    int skip;
+    int skip_left;
+    int skip_right;
     int buffer_size;
     cell *left_far;
     cell *left_near;
@@ -57,6 +60,8 @@ typedef struct Game_t {
     int h;
     cell *grid;
     Index index;
+    int skip_right;
+    int skip_left;
     void (*start_time)    (Time *time, const Index *index);
     void (*exchange_edge) (Message *message, const Index *index);
     void (*print)         (const struct Game_t *game, const Index *index);
@@ -66,6 +71,7 @@ typedef struct Game_t {
 
 void draw_glider(cell *grid, int w, int h) {
     #define SET(x, y) grid[x * h + y] = CELL_ALIVE;
+    
     SET(2, 2);
     SET(2, 4);
     SET(3, 5);
@@ -108,6 +114,8 @@ Game game_init(
         .h = h,
         .grid = grid,
         .index = index,
+        .skip_right = 0,
+        .skip_left  = 0,
         .start_time          = start_time,
         .exchange_edge       = exchange_edge,
         .print               = print,
@@ -192,8 +200,12 @@ static void evalute(Game *game) {
             }
         }
     }
-    for (int y = 0; y < game->h; ++y) {
-        for (int x = 1; x + 1 < game->w; ++x) {
+    int skip_left  = 0;
+    int skip_right = 0;
+    int is_skip_left_blocked = 0;
+    for (int x = 1; x + 1 < game->w; ++x) {
+        int is_all_dead = 1;
+        for (int y = 0; y < game->h; ++y) {
             cell *cell_ptr = game_get_cell(game, x, y);
             if (*cell_ptr == CELL_DYING) {
                 *cell_ptr = CELL_DEAD;
@@ -201,27 +213,43 @@ static void evalute(Game *game) {
             if (*cell_ptr == CELL_NEWBORN) {
                 *cell_ptr = CELL_ALIVE;
             }
+            if (*cell_ptr == CELL_ALIVE) {
+                is_all_dead = 0;
+            }
+        }
+        if (is_all_dead) {
+            if (!is_skip_left_blocked) {
+                ++skip_left;
+            }
+        } else {
+            is_skip_left_blocked = 1;
+            skip_right = game->w - x - 2;
         }
     }
+    game->skip_left  = skip_left;
+    game->skip_right = skip_right;
+    // printf("real rank: %d -> (%d, %d) = %d\n", game->index.rank, skip_left, skip_right, 28 - skip_left - skip_right);
 }
 
 void game_start_game_loop(Game *game) {
     Time time = time_init();
+    game->print(game, &game->index);
     while (1) {
-        game->print(game, &game->index);
         // game->start_time(&time);
+        evalute(game);
         int w = game->w;
         int h = game->h;
         Message message = {
-            .skip = 0,
-            .left_far   = game->grid,
-            .left_near  = game->grid + h,
-            .right_far  = game->grid + h * (w - 1),
-            .right_near = game->grid + h * (w - 2),
+            .skip_left   = game->skip_left,
+            .skip_right  = game->skip_right,
+            .left_far    = game->grid,
+            .left_near   = game->grid + h,
+            .right_far   = game->grid + h * (w - 1),
+            .right_near  = game->grid + h * (w - 2),
             .buffer_size = game->h
         };
         game->exchange_edge(&message, &game->index);
-        evalute(game);
+        game->print(game, &game->index);
         // game->end_time(&time);
         // game->exchenge_time(&time);
         DOT
@@ -322,6 +350,8 @@ static void second_stage(
 static void third_stage(
     Message *message,
     cell *temp,
+    int comm_left,
+    int comm_right,
     int rank,
     int size
 ) {
@@ -330,20 +360,29 @@ static void third_stage(
     cell *left_far   = message->left_far;
     cell *left_near  = message->left_near;
     int count = message->buffer_size;
+    if (size == 1) {
+        memcpy(left_far, right_near, count*sizeof(cell));
+        memcpy(right_far, left_near, count*sizeof(cell));
+        return;
+    }
     if (rank == 0) {
-        RET_IF_ERR(
-            MPI_Send(
-                left_near, count, MPI_CHAR,
-                size - 1, TAG_EDGE, MPI_COMM_WORLD
-            )
-        );
-        RET_IF_ERR(
-            MPI_Recv(
-                temp, count, MPI_CHAR, 
-                size - 1, TAG_EDGE, MPI_COMM_WORLD,
-                MPI_STATUS_IGNORE
-            )
-        );
+        if (comm_left) {
+            RET_IF_ERR(
+                MPI_Send(
+                    left_near, count, MPI_CHAR,
+                    size - 1, TAG_EDGE, MPI_COMM_WORLD
+                )
+            );
+        }
+        if (comm_left) {
+            RET_IF_ERR(
+                MPI_Recv(
+                    temp, count, MPI_CHAR, 
+                    size - 1, TAG_EDGE, MPI_COMM_WORLD,
+                    MPI_STATUS_IGNORE
+                )
+            );
+        }
         memcpy(left_far, temp, count*sizeof(cell));
     } else if (rank + 1 == size) {
         RET_IF_ERR(
@@ -363,6 +402,38 @@ static void third_stage(
     }
 }
 
+void code_skip_side(int skip, cell *edge) {
+    assert(sizeof(int)  == 4);
+    assert(sizeof(cell) == 1);
+    char *skip_arr = (cell*)(&skip);
+    for (int q = 0; q < 4; ++q) {
+        edge[4] += edge[q] << q;
+        edge[q] = skip_arr[q];
+    }
+}
+
+int decode_skip_side(cell *edge) {
+    assert(sizeof(int)  == 4);
+    assert(sizeof(cell) == 1);
+    int skip = 0;
+    char *skip_arr = (cell*)(&skip);
+    for (int q = 0; q < 4; ++q) {
+        skip_arr[q] = edge[q];
+        edge[q] = edge[4] & (1 << q);
+    }
+    return skip;
+}
+
+void code_skip(Message *message) {
+    code_skip_side(message->skip_left, message->left_near);
+    code_skip_side(message->skip_right, message->right_near);
+}
+
+void decode_skip(Message *message, int skips[2]) {
+    skips[0] = decode_skip_side(message->left_far);
+    skips[1] = decode_skip_side(message->right_far);
+}
+
 void start_time(Time *time, const Index *index) {}
 void exchange_edge_sequential (Message *message, const Index *index) {}
 void exchange_edge_mpi (Message *message, const Index *index) {
@@ -370,9 +441,14 @@ void exchange_edge_mpi (Message *message, const Index *index) {
     int size = index->rank_count;
     cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
     
+    printf("rank: %d -> (%d, %d)\n", index->rank, message->skip_left, message->skip_right);
+    code_skip(message);
     first_stage(message, temp_buffer, rank, size);
     second_stage(message, temp_buffer, rank, size);
     third_stage(message, temp_buffer, rank, size);
+    int skips[2];
+    decode_skip(message, skips);
+    printf("rank: %d -> (%d, %d)\n", index->rank, skips[0], skips[1]);
 
     free(temp_buffer);
 }
@@ -422,8 +498,7 @@ void print_mpi(const struct Game_t *game, const Index *index) {
 void end_time(Time *time, const Index *index) {}
 void exchenge_time(Time *time, const Index *index) {}
 
-// ------------------------------------------------------------------------
-
+// --------------------------------------------------------- main functions
 
 int main_sequantial(int argc, char **argv) {
 

@@ -8,7 +8,7 @@ mcomp:
 run:
 	./game.out
 mrun:
-	mpiexec -n 3 ./game.out
+	mpiexec -n 1 ./game.out
 
 car: comp run
 mcar: mcomp mrun
