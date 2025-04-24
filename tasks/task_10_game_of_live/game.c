@@ -6,8 +6,6 @@
 #include <mpi.h>
 
 #include "../../slibs/err_proc.h"
-#include "mpi_proto.h"
-// #include "mpi_proto.h"
 
 
 
@@ -238,7 +236,6 @@ static void evalute(Game *game) {
     }
     game->skip_left  = skip_left;
     game->skip_right = skip_right;
-    // printf("real rank: %d -> (%d, %d) = %d\n", game->index.rank, skip_left, skip_right, 28 - skip_left - skip_right);
 }
 
 void game_start_game_loop(Game *game) {
@@ -259,16 +256,38 @@ void game_start_game_loop(Game *game) {
             .buffer_size = game->h
         };
         game->exchange_edge(&message, &game->index);
-        usleep(100000);
+        // usleep(100000);
         game->print(game, &game->index);
         // game->end_time(&time);
         // game->exchenge_time(&time);
         usleep(100000);
-        if (game->index.rank == 0) { DOT }
     }
 }
 
-// ------------------------------------------------------------------------
+// ---------------------------------------------------- Default realization
+
+void start_time(Time *time, const Index *index) {}
+void exchange_edge (Message *message, const Index *index) {}
+void print(const struct Game_t *game, const Index *index) {}
+void end_time(Time *time, const Index *index) {}
+void exchenge_time(Time *time, const Index *index) {}
+
+// ----------------------------------------------------- Sequamtial version
+
+void print_sequential(const struct Game_t *game, const Index *index) {
+    for (int y = 0; y < game->h; ++y) {
+        for (int x = 0; x < game->w; ++x) {
+            if (game_is_alive(game, x, y)) {
+                printf("#");
+            } else {
+                printf("_");
+            }
+        }
+        printf("\n");
+    }
+}
+
+// ------------------------------------------------------------ MPI version
 
 typedef struct Comm_t {
     int recv_left;
@@ -292,14 +311,20 @@ static void comm_timer_step(Comm *comm) {
 
 static void comm_set_new_val(Comm *comm, Message *message, int skips[2]) {
     #define MAX(x, y) ((x) > (y)) ? (x) : (y)
-    if (comm->recv_left  == 0) { comm->recv_left  = MAX(skips[0]            - 1, 0); }
-    if (comm->send_left  == 0) { comm->send_left  = MAX(message->skip_left  - 1, 0); }
-    if (comm->recv_right == 0) { comm->recv_right = MAX(skips[1]            - 1, 0); }
-    if (comm->send_right == 0) { comm->send_right = MAX(message->skip_right - 1, 0); }
-    // comm->recv_left =  (comm->recv_left  < 0) ? 0 : comm->recv_left;
-    // comm->send_left =  (comm->send_left  < 0) ? 0 : comm->send_left;
-    // comm->recv_right = (comm->recv_right < 0) ? 0 : comm->recv_right;
-    // comm->send_right = (comm->send_right < 0) ? 0 : comm->send_right;
+
+    if (comm->recv_left  == 0) {
+        comm->recv_left  = MAX(skips[0] - 1, 0);
+    }
+    if (comm->send_left  == 0) {
+        comm->send_left  = MAX(message->skip_left - 1, 0);
+    }
+    if (comm->recv_right == 0) {
+        comm->recv_right = MAX(skips[1] - 1, 0);
+    }
+    if (comm->send_right == 0) {
+        comm->send_right = MAX(message->skip_right - 1, 0);
+    }
+
     #undef MAX
 }
 
@@ -467,48 +492,42 @@ static void third_stage(
     }
 }
 
-void code_skip_side(int skip, cell *edge) {
+static void code_skip_side(int skip, cell *edge) {
     assert(sizeof(int)  == 4);
     assert(sizeof(cell) == 1);
     cell *skip_arr = (cell*)(&skip);
-    // printf("skip    "); for (int q = 0; q < 4; ++q) { printf("%d ", skip_arr[q]); } printf("\n");
-    // printf("before  "); for (int q = 0; q < 10; ++q) { printf("%d ", edge[q]); } printf("\n");
     for (int q = 0; q < 4; ++q) {
         edge[4] += edge[q] << (q + 1);
         edge[q] = skip_arr[q];
     }
-    // printf("coded   "); for (int q = 0; q < 10; ++q) { printf("%d ", edge[q]); } printf("\n");
 }
 
-int decode_skip_side(cell *edge) {
+static int decode_skip_side(cell *edge) {
     assert(sizeof(int)  == 4);
     assert(sizeof(cell) == 1);
     int skip = 0;
     cell *skip_arr = (cell*)(&skip);
-    // printf("coded  "); for (int q = 0; q < 10; ++q) { printf("%d ", edge[q]); } printf("\n");
     for (int q = 0; q < 4; ++q) {
         skip_arr[q] = edge[q];
         edge[q] = (edge[4] >> (q + 1)) & 1;
     }
-    // printf("after  "); for (int q = 0; q < 10; ++q) { printf("%d ", edge[q]); } printf("\n");
     edge[4] = edge[4] & 1;
     return skip;
 }
 
-void code_skip(Message *message) {
+static void code_skip(Message *message) {
     code_skip_side(message->skip_left, message->left_near);
     code_skip_side(message->skip_right, message->right_near);
 }
 
-void decode_skip(Message *message, int skips[2]) {
+static void decode_skip(Message *message, int skips[2]) {
     skips[0] = decode_skip_side(message->left_far);
     skips[1] = decode_skip_side(message->right_far);
     decode_skip_side(message->left_near);
     decode_skip_side(message->right_near);
 }
 
-void start_time(Time *time, const Index *index) {}
-void exchange_edge_sequential (Message *message, const Index *index) {}
+
 void exchange_edge_mpi (Message *message, const Index *index) {
     int rank = index->rank;
     int size = index->rank_count;
@@ -519,41 +538,19 @@ void exchange_edge_mpi (Message *message, const Index *index) {
         .recv_right = 0,
         .send_right = 0
     };
-    // printf("%d -> %d ", rank, comm.recv_left); printf("%d ", comm.send_left); printf("%d ", comm.recv_right); printf("%d\n", comm.send_right);
-    // for (int q = 0; q < 10; ++q) { printf("%d ", message->left_near[q]); } printf("\n");
-    // printf("rank: %d -> (%d, %d)\n", index->rank, message->skip_left, message->skip_right);
     code_skip(message);
     first_stage(message, temp_buffer, &comm, rank, size);
     second_stage(message, temp_buffer, &comm, rank, size);
     third_stage(message, temp_buffer, &comm, rank, size);
     int skips[2];
     decode_skip(message, skips);
-    // printf("%d -> mes  : %d %d\n", rank, message->skip_left, message->skip_right);
-    // printf("%d -> skips: %d %d\n", rank, skips[0], skips[1]);
-
     
     comm_set_new_val(&comm, message, skips);
     comm_timer_step(&comm);
-    // printf("%d -> %d ", rank, comm.recv_left);
-    // printf("%d ", comm.send_left);
-    // printf("%d ", comm.recv_right);
-    // printf("%d\n", comm.send_right);
-    // printf("rank: %d -> (%d, %d)\n", index->rank, skips[0], skips[1]);
 
     free(temp_buffer);
 }
-void print_sequential(const struct Game_t *game, const Index *index) {
-    for (int y = 0; y < game->h; ++y) {
-        for (int x = 0; x < game->w; ++x) {
-            if (game_is_alive(game, x, y)) {
-                printf("#");
-            } else {
-                printf("_");
-            }
-        }
-        printf("\n");
-    }
-}
+
 void print_mpi(const struct Game_t *game, const Index *index) {
     const int main_rank = 0;
     int rank = index->rank;
@@ -561,7 +558,8 @@ void print_mpi(const struct Game_t *game, const Index *index) {
     int grid_size = game->w * game->h;
     cell *buffer = NULL;
     if (rank == main_rank) {
-        buffer = (cell*) malloc(index->rank_count * grid_size * sizeof(cell));
+        buffer = (cell*) malloc(index->rank_count * grid_size
+                                                        * sizeof(cell));
     }
     RET_IF_ERR(
         MPI_Gather(
@@ -574,26 +572,17 @@ void print_mpi(const struct Game_t *game, const Index *index) {
         for (int y = 0; y < game->h; ++y) {
             for (int proc = 0; proc < index->rank_count; ++proc) {
                 for (int x = 1; x + 1 < game->w; ++x) {
-                // for (int x = 0; x < game->w; ++x) {
                     if ((buffer + grid_size*proc)[x * game->h + y]) {
                         printf("#");
                     } else {
-                        if (x == 1 || x == game->w - 2) {
-                            // printf("'");
-                            printf("_");
-                        } else {
-                            printf("_");
-                        }
+                        printf("_");
                     }
                 }
-                // printf(" ");
             }
             printf("\n");
         }
     }
 }
-void end_time(Time *time, const Index *index) {}
-void exchenge_time(Time *time, const Index *index) {}
 
 // --------------------------------------------------------- main functions
 
@@ -605,7 +594,7 @@ int main_sequantial(int argc, char **argv) {
         10,
         index,
         start_time,
-        exchange_edge_sequential,
+        exchange_edge,
         print_sequential,
         end_time,
         exchenge_time
@@ -643,7 +632,35 @@ int main_mpi(int argc, char **argv) {
     return 0;
 }
 
+int main_hybrid(int argc, char **argv) {
+
+    MPI_Init(&argc, &argv);
+
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    Index index = index_init(0, 1, rank, size);
+    Game game = game_init(
+        30,
+        20,
+        index,
+        start_time,
+        exchange_edge_hybrid,
+        print_hybrid,
+        end_time,
+        exchenge_time
+    );
+
+    game_start_game_loop(&game);
+
+    MPI_Finalize();
+
+    return 0;
+}
+
 int main(int argc, char **argv) {
     // return main_sequantial(argc, argv);
-    return main_mpi(argc, argv);
+    // return main_mpi(argc, argv);
+    return main_hybrid(argc, argv);
 }
