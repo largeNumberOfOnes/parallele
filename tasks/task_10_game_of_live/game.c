@@ -1,11 +1,14 @@
 #include <assert.h>
 #include <limits.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <mpi.h>
 
 #include "../../slibs/err_proc.h"
+#include "mpi_proto.h"
 
 
 
@@ -95,6 +98,38 @@ void draw_lwss(cell *grid, int w, int h) {
     #undef SET
 }
 
+// If you use this init function, you should free grid before calling
+//    game_dstr() and put NULL into game.grid field.
+Game game_init_with_grid(
+    int w,
+    int h,
+    Index index,
+    cell *grid,
+    void (*start_time)    (Time *time, const Index *index),
+    void (*exchange_edge) (Message *message, const Index *index),
+    void (*print)         (const struct Game_t *game, const Index *index),
+    void (*end_time)      (Time *time, const Index *index),
+    void (*exchenge_time) (Time *time, const Index *index)
+) {
+    if (index.rank == 0) {
+        // draw_lwss(grid, w, h);
+        // draw_glider(grid, w, h, 2, 2);
+    }
+    return (Game) {
+        .w = w,
+        .h = h,
+        .grid = grid,
+        .index = index,
+        .skip_right = 0,
+        .skip_left  = 0,
+        .start_time          = start_time,
+        .exchange_edge       = exchange_edge,
+        .print               = print,
+        .end_time            = end_time,
+        .exchenge_time       = exchenge_time
+    };
+}
+
 Game game_init(
     int w,
     int h,
@@ -132,7 +167,7 @@ Game game_init(
     };
 }
 
-void game_dent(Game *game) {
+void game_dstr(Game *game) {
     free(game->grid);
 }
 
@@ -528,7 +563,7 @@ static void decode_skip(Message *message, int skips[2]) {
 }
 
 
-void exchange_edge_mpi (Message *message, const Index *index) {
+void exchange_edge_mpi(Message *message, const Index *index) {
     int rank = index->rank;
     int size = index->rank_count;
     cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
@@ -560,6 +595,7 @@ void print_mpi(const struct Game_t *game, const Index *index) {
     if (rank == main_rank) {
         buffer = (cell*) malloc(index->rank_count * grid_size
                                                         * sizeof(cell));
+        // This does not look good    
     }
     RET_IF_ERR(
         MPI_Gather(
@@ -580,6 +616,77 @@ void print_mpi(const struct Game_t *game, const Index *index) {
                 }
             }
             printf("\n");
+        }
+    }
+    if (rank == main_rank) {
+        free(buffer);
+    }
+}
+
+// --------------------------------------------------------- Hybrid version
+
+void exchange_edge_hybrid(Message *message, const Index *index) {
+    int rank = index->node;
+    int size = index->node_count;
+    cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
+    static Comm comm =  {
+        .recv_left  = 0,
+        .send_left  = 0,
+        .recv_right = 0,
+        .send_right = 0
+    };
+    // code_skip(message);
+    first_stage(message, temp_buffer, &comm, rank, size);
+    third_stage(message, temp_buffer, &comm, rank, size);
+    int skips[2];
+    // decode_skip(message, skips);
+    
+    // comm_set_new_val(&comm, message, skips);
+    // comm_timer_step(&comm);
+
+    thread_barier()
+
+    free(temp_buffer);
+}
+
+void print_hybrid(const struct Game_t *game, const Index *index) {
+    if (index->rank == 0) {
+        const int main_node = 0;
+        int node = index->node;
+        int size = index->node_count;
+        int w = (game->w - 2) * index->rank_count;
+        int h = game->h;
+        cell *grid = game->grid + 1;
+        int grid_size = w * h;
+        cell *buffer = NULL;
+        if (node == main_node) {
+            buffer = (cell*) malloc(size * grid_size * sizeof(cell));
+            // This does not look good
+        }
+        RET_IF_ERR(
+            MPI_Gather(
+                grid, grid_size, MPI_CHAR,
+                buffer, grid_size, MPI_CHAR,
+                main_node, MPI_COMM_WORLD
+            )
+        );
+        if (node == main_node) {
+            for (int y = 0; y < h; ++y) {
+                for (int proc = 0; proc < size; ++proc) {
+                    for (int x = 0; x < w; ++x) {
+                        if ((buffer + grid_size*proc)[x * h + y]) {
+                            printf("#");
+                        } else {
+                            printf("_");
+                        }
+                    }
+                }
+                printf("\n");
+            }
+            printf("\n\n");
+        }
+        if (node == main_node) {
+            free(buffer);
         }
     }
 }
@@ -632,19 +739,21 @@ int main_mpi(int argc, char **argv) {
     return 0;
 }
 
-int main_hybrid(int argc, char **argv) {
+typedef struct ThreadData_t {
+    Index index;
+    cell *grid;
+    int w;
+    int h;
+} ThreadData;
 
-    MPI_Init(&argc, &argv);
+void *thread_function(void *data_void) {
+    ThreadData *data = (ThreadData*) data_void;
 
-    int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    Index index = index_init(0, 1, rank, size);
-    Game game = game_init(
-        30,
-        20,
-        index,
+    Game game = game_init_with_grid(
+        data->w,
+        data->h,
+        data->index,
+        data->grid,
         start_time,
         exchange_edge_hybrid,
         print_hybrid,
@@ -654,6 +763,61 @@ int main_hybrid(int argc, char **argv) {
 
     game_start_game_loop(&game);
 
+    // game_dstr(&game);
+
+    return NULL;
+}
+
+int main_hybrid(int argc, char **argv) {
+
+    MPI_Init(&argc, &argv);
+
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    assert(size == 2);
+
+    int thread_grid_width = 15;
+    int thread_per_proc = 2;
+    int w = thread_grid_width + 2 * thread_per_proc + 2;
+    int h = 20;
+    cell *grid = (cell*) malloc(h * w * sizeof(cell));
+    for (int x = 0; x < w; ++x) {
+        for (int y = 0; y < h; ++y) {
+            grid[x * h + y] = CELL_DEAD;
+        }
+    }
+    if (rank == 0) {
+        draw_lwss(grid, w, h);
+    }
+DOT
+    pthread_t *thread_arr = (pthread_t*) malloc(thread_per_proc *
+                                                    sizeof(pthread_t));
+    ThreadData *data_arr = (ThreadData*) malloc(thread_per_proc * 
+                                                    sizeof(ThreadData));
+    for (int q = 0; q < thread_per_proc; ++q) {
+        data_arr[q] = (ThreadData) {
+            .index = index_init(rank, 2, q, thread_per_proc),
+            .grid  = grid + (thread_grid_width - 2) * q,
+            .w = thread_grid_width,
+            .h = h
+        };
+    }
+DOT
+    for (int thread_num = 1; thread_num < thread_per_proc; ++thread_num) {
+        pthread_create(
+            &(thread_arr[thread_num]),
+            NULL,
+            thread_function,
+            (void*) (&data_arr[thread_num])
+        );
+    }
+DOT
+    thread_function((void*) data_arr);
+DOT
+
+    free(thread_arr);
+    free(data_arr);
     MPI_Finalize();
 
     return 0;
@@ -661,6 +825,6 @@ int main_hybrid(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     // return main_sequantial(argc, argv);
-    // return main_mpi(argc, argv);
-    return main_hybrid(argc, argv);
+    return main_mpi(argc, argv);
+    // return main_hybrid(argc, argv);
 }
