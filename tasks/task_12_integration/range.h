@@ -8,7 +8,7 @@
 
 inline bool double_equal(double a, double b) {
     constexpr double eps = 0.0001;
-    return fabs(a - b) < eps*(a + b);
+    return fabs(a - b) < eps;
 }
 
 class Range {
@@ -77,8 +77,8 @@ inline bool Range::is_valid() const {
 }
 
 inline bool Range::operator==(const Range& other) const {
-    return double_equal(a,  other.a)
-        && double_equal(b,  other.b)
+    return double_equal(a ,  other.a)
+        && double_equal(b ,  other.b)
         && double_equal(fa, other.fa)
         && double_equal(fb, other.fb)
     ;

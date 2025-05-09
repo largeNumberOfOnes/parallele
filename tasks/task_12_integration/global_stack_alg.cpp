@@ -1,6 +1,3 @@
-
-
-
 #include <assert.h>
 #include <chrono>
 #include <cmath>
@@ -16,11 +13,15 @@
 #include "../../slibs/err_proc.h"
 
 
+// #undef DOT
+#define DRT printf("\033[95mDOT rank %d from line: %d, %s\033[39m\n", data.rank, __LINE__, __FILE__);
+
 constexpr std::size_t local_stack_size  = 1000;
 constexpr std::size_t global_stack_size = 1000;
 
 struct ThreadData {
     Stack* global_stack;
+    pthread_t* thread_arr;
     int proc_count;
     int init_elems;
     int rank;
@@ -36,7 +37,7 @@ DOT
     std::cout << "I am thread " << data.rank << std::endl;
 
     Stack& global_stack = *data.global_stack;
-    Stack stack{local_stack_size};
+    Stack stack{local_stack_size, false};
 DOT
 
     if (true) {
@@ -48,11 +49,11 @@ DOT
     std::cout << "Stack of thread " << data.rank << std::endl;
     stack.print_stack();
 
+DRT
     while (true) {
-DOT
         if (!stack.is_empty()) {
-DOT
-            LOG("Proccesing range")
+            DRT
+            // LOG("Proccesing range")
             Range cur_range = stack.pop();
             double sabc = cur_range.calc_area();
             double c = cur_range.calc_mid_point();
@@ -67,13 +68,25 @@ DOT
                 Stack::move_ratio(stack, global_stack, Stack::max_ratio);
             }
         } else {
+            DRT
             break;
-            // if (data.is_main && global_stack.waiters_count() == data.proc_count) {
-            //     // end the program
+            // PRINT_NAME(global_stack.get_waiters_count())
+            // if (data.is_main
+            // ) {
+            //     DRT
+            //     global_stack.wait_waiters_count(data.proc_count - 1);
+            //     PRINT_NAME(global_stack.get_waiters_count())
+            //     PRINT_NAME(data.proc_count)
+            //     for (int q = 1; q < data.proc_count; ++q) {
+            //         pthread_cancel(data.thread_arr[q]);
+            //     }
+            //     break;
+            // } else {
+            //     DRT
+            //     Stack::move_ratio(global_stack, stack, 30);
             // }
-            // Stack::move_ratio_await(global_stack, stack, 30);
         }
-std::cout << "\n\n" << std::endl;
+// std::cout << "\n\n" << std::endl;
 // std::this_thread::sleep_for(std::chrono::seconds(1));
     }
     return nullptr;
@@ -98,11 +111,13 @@ double global_stack_alg(
     }
     global_stack.push(range);
 
+	pthread_t* thread_arr = static_cast<pthread_t*>(::operator new[](sizeof(pthread_t)*proc_count));
     ThreadData* thread_data_arr = new ThreadData[proc_count];
     double* sum_arr = new double[proc_count];
     for (int q = 0; q < proc_count; ++q) {
         thread_data_arr[q] = {
             .global_stack = &global_stack,
+            .thread_arr = thread_arr,
             .proc_count = proc_count,
             .init_elems = cnt_per_proc,
             .rank = q,
@@ -112,7 +127,6 @@ double global_stack_alg(
             .sum = sum_arr
         };
     }
-	pthread_t* thread_arr = static_cast<pthread_t*>(::operator new[](sizeof(pthread_t)*proc_count));
 
         DOT
     for (int thread_num = 1; thread_num < proc_count; ++thread_num) {
@@ -126,9 +140,9 @@ double global_stack_alg(
     }
     thread_function(reinterpret_cast<void*>(&thread_data_arr[0]));
 
-    for (int q = 0; q < proc_count; ++q) {
-        pthread_join(thread_arr[q], nullptr);
-    }
+    // for (int q = 0; q < proc_count; ++q) {
+    //     pthread_join(thread_arr[q], nullptr);
+    // }
 
     double sum = 0;
     for (int q = 0; q < proc_count; ++q) {
