@@ -1,5 +1,10 @@
+WFLAGS = -Wall -Wextra
+
+lint:
+	cppcheck --language=c++ -q main.cpp global_stack_alg.cpp stack.h range.h
+
 comp:
-	g++ -g main.cpp global_stack_alg.cpp
+	g++ -std=c++23 -g $(WFLAGS) main.cpp global_stack_alg.cpp
 
 run:
 	./a.out

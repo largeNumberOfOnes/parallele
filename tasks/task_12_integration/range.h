@@ -5,8 +5,7 @@
 
 
 
-
-inline bool double_equal(double a, double b) {
+static inline bool double_equal(double a, double b) {
     constexpr double eps = 0.0001;
     return fabs(a - b) < eps;
 }
@@ -39,13 +38,6 @@ class Range {
         inline double get_b() const { return a; }
         inline double get_len() const { return b - a; }
 };
-
-
-
-#include "range.h"
-#include <math.h>
-
-
 
 inline Range::Range(double a, double b, double fa, double fb)
     : a(a), b(b), fa(fa), fb(fb)
@@ -102,7 +94,7 @@ inline double Range::calc_mid_point() const {
 
 inline bool Range::calc_cond(double eps, double c, double fc) const {
     double sAB = calc_area();
-    double sACB = (fa + 2*fc + fb) * (b - a) / 4;
+    double sACB = (c*fa - a*fc + b*fc - c*fb + b*fb - a*fa)/2;
     return fabs(sAB - sACB) < eps*fabs(sACB);
 }
 
