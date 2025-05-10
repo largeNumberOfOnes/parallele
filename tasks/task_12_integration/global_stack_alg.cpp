@@ -19,16 +19,16 @@ static pthread_cond_t global_stack_cond;
 static int global_stack_waiters = 0;
 void global_stack_mutex_init() {
     if (false
-        || !pthread_mutex_init(&global_stack_mutex, nullptr)
-        || !pthread_cond_init(&global_stack_cond, nullptr)
+        || pthread_mutex_init(&global_stack_mutex, nullptr)
+        || pthread_cond_init(&global_stack_cond, nullptr)
     ) {
         assert(0);
     }
 }
 void global_stack_mutex_destroy() {
     if (false
-        || !pthread_mutex_destroy(&global_stack_mutex)
-        || !pthread_cond_destroy(&global_stack_cond)
+        || pthread_mutex_destroy(&global_stack_mutex)
+        || pthread_cond_destroy(&global_stack_cond)
     ) {
         assert(0);
     }
@@ -227,7 +227,7 @@ double global_stack_alg(
         std::cout << sum_arr[q] << " ";
         sum += sum_arr[q];
     }
-    std::cout << "\n sum: " << sum << std::endl;
+        std::cout << std::endl;
 
     for (int q = 0; q < proc_count; ++q) {
         local_stack_arr[q].~Stack();
@@ -240,5 +240,5 @@ double global_stack_alg(
 
     global_stack_mutex_destroy();
 
-    return 0;
+    return sum;
 }
