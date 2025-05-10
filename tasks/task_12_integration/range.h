@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <iostream>
 #include <ostream>
 
 
@@ -17,15 +18,14 @@ class Range {
     double fb;
 
     public:
+        inline Range();
         inline Range(double a, double b, double fa, double fb);
         inline Range(double a, double b, double (*f)(double));
-        inline Range(Range& range);
 
         inline bool is_valid() const;
         inline Range split_range(double splitter, double value);
 
         bool operator==(const Range& other) const;
-        inline Range& operator=(const Range& other);
 
         double calc_area() const;
         double calc_mid_point() const;
@@ -39,19 +39,16 @@ class Range {
         inline double get_len() const { return b - a; }
 };
 
+inline Range::Range()
+    : a(0), b(0), fa(0), fb(0)
+{}
+
 inline Range::Range(double a, double b, double fa, double fb)
     : a(a), b(b), fa(fa), fb(fb)
 {}
 
 inline Range::Range(double a, double b, double (*f)(double))
     : a(a), b(b), fa(f(a)), fb(f(b))
-{}
-
-inline Range::Range(Range& range)
-    : a (range.a)
-    , b (range.b)
-    , fa(range.fa)
-    , fb(range.fb)
 {}
 
 // Cuts down given range to (a, spliter), returns (splitter, b)
@@ -65,7 +62,9 @@ inline Range Range::split_range(double splitter, double value) {
 }
 
 inline bool Range::is_valid() const {
-    return a < b;
+    double eps = 1e-14;
+    double c = calc_mid_point();
+    return a + eps < c && c + eps < b && a + eps < b;
 }
 
 inline bool Range::operator==(const Range& other) const {
@@ -74,14 +73,6 @@ inline bool Range::operator==(const Range& other) const {
         && double_equal(fa, other.fa)
         && double_equal(fb, other.fb)
     ;
-}
-
-inline Range& Range::operator=(const Range& other) {
-    a  = other.a;
-    b  = other.b;
-    fa = other.fa;
-    fb = other.fb;
-    return *this;
 }
 
 inline double Range::calc_area() const {
@@ -99,6 +90,6 @@ inline bool Range::calc_cond(double eps, double c, double fc) const {
 }
 
 inline std::ostream& operator<<(std::ostream& out, const Range& range) {
-    out << "(" << range.a << " " << range.b << ")";
+    out << "(" << range.a << " " << range.b << ")" << range.b - range.a;
     return out;
 }

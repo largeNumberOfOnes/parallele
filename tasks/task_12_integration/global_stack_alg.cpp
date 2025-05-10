@@ -3,6 +3,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <iostream>
+#include <new>
 #include <optional>
 #include <pthread.h>
 #include <thread>
@@ -10,14 +12,10 @@
 #include "range.h"
 #include "stack.h"
 
-#include "../../slibs/err_proc.h"
 
 
-// #undef DOT
-#define DRT printf("\033[95mDOT rank %d from line: %d, %s\033[39m\n", data.rank, __LINE__, __FILE__);
-
-constexpr std::size_t local_stack_size  = 1000;
-constexpr std::size_t global_stack_size = 1000;
+constexpr std::size_t local_stack_size  = 10000;
+constexpr std::size_t global_stack_size = 10000;
 constexpr int main_rank = 0;
 
 static bool stop_signal = false;
@@ -55,7 +53,7 @@ struct ThreadData {
     Stack* global_stack;
     Stack* local_stack;
     Stack* local_stack_arr;
-    int mean;
+    int* mean;
     int rank;
     int size;
     double (*f)(double);
@@ -69,29 +67,23 @@ void balance_elements(ThreadData& data, Stack& stack, Stack& global_stack) {
         for (int q = 0; q < data.size; ++q) {
             mean += data.local_stack_arr[q].get_occupancy();
         }
+        mean += global_stack.get_occupancy();
         mean /= data.size;
-        data.mean = mean;
+        *data.mean = mean;
     }
-    if (stack.get_occupancy() > data.mean) {
-        global_stack_mutex_lock();
-        for (int q = 0; q < stack.get_occupancy() - data.mean; ++q) {
-            Range range = stack.pop();
-            global_stack.push(range);
-        }
+    global_stack_mutex_lock();
+    int mean = *data.mean;
+    if (stack.get_occupancy() > mean) {
+        Stack::move(stack, global_stack, stack.get_occupancy() - mean);
         global_stack_broadcast_event();
-        global_stack_mutex_unlock();
-    } else if (stack.get_occupancy() < data.mean) {
-        global_stack_mutex_lock();
+    } else if (stack.get_occupancy() < mean) {
         int count = std::min(
             global_stack.get_occupancy(),
-            data.mean - stack.get_occupancy()
+            mean - stack.get_occupancy()
         );
-        for (int q = 0; q < count; ++q) {
-            Range range = global_stack.pop();
-            stack.push(range);
-        }
-        global_stack_mutex_unlock();
+        Stack::move(global_stack, stack, count);
     }
+    global_stack_mutex_unlock();
 }
 
 bool take_elements_from_global_stack(Stack& stack, Stack& global_stack, int size) {
@@ -128,26 +120,28 @@ void* thread_function(void* void_data) {
     Stack& stack = *data.local_stack;
     Stack& global_stack = *data.global_stack;
 
-    // global_stack_mutex_lock();
-    // std::cout << "proc: " << data.rank << std::endl;
-    // stack.print_stack();
-    // global_stack_mutex_unlock();
-    // return nullptr;
-
     int balance_time = 0;
     while (true) {
         if (!stack.is_empty()) {
             Range cur_range = stack.pop();
+            if (!cur_range.is_valid()) {
+                continue;
+            }
             double sabc = cur_range.calc_area();
             double c = cur_range.calc_mid_point();
             double fc = data.f(c);
             if (!cur_range.calc_cond(data.eps, c, fc)) {
-                stack.push(cur_range.split_range(c, fc));
-                stack.push(cur_range);
+                Range range1 = cur_range.split_range(c, fc);
+                if (range1.is_valid()) {
+                    stack.push(range1);
+                }
+                if (cur_range.is_valid()) {
+                    stack.push(cur_range);
+                }
             } else {
                 *data.sum += sabc;
             }
-            if (balance_time == 10) {
+            if (balance_time == 40) {
                 
                 balance_elements(data, stack, global_stack);
                 balance_time = 0;
@@ -158,7 +152,6 @@ void* thread_function(void* void_data) {
             if (!take_elements_from_global_stack(stack, global_stack, data.size)) {
                 break;
             }
-            // break;
         }
     }
 
@@ -168,6 +161,7 @@ void* thread_function(void* void_data) {
 double global_stack_alg(
     Range range,
     double (*f)(double),
+    double eps,
     int proc_count
 ) {
     assert(range.is_valid());
@@ -193,12 +187,10 @@ double global_stack_alg(
         }
     }
 
-	// pthread_t* thread_arr = static_cast<pthread_t*>(
-    //     ::operator new[](proc_count * sizeof(pthread_t))
-    // );
     pthread_t* thread_arr = new pthread_t[proc_count];
     ThreadData* thread_data_arr = new ThreadData[proc_count];
     double* sum_arr = new double[proc_count];
+    int mean_count = count_per_proc;
 
     for (int q = 0; q < proc_count; ++q) {
         sum_arr[q] = 0;
@@ -206,11 +198,11 @@ double global_stack_alg(
             .global_stack = &global_stack,
             .local_stack  = &local_stack_arr[q],
             .local_stack_arr = local_stack_arr,
-            .mean = count_per_proc,
+            .mean = &mean_count,
             .rank = q,
             .size = proc_count,
             .f = f,
-            .eps = 0.0001,
+            .eps = eps,
             .sum = &sum_arr[q]
         };
         if (q != 0) {
@@ -239,6 +231,11 @@ double global_stack_alg(
     for (int q = 0; q < proc_count; ++q) {
         local_stack_arr[q].~Stack();
     }
+
+    delete [] sum_arr;
+    delete [] thread_data_arr;
+    delete [] thread_arr;
+    ::operator delete[](local_stack_arr);
 
     return 0;
 }
