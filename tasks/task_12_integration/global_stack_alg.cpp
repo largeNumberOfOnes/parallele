@@ -1,13 +1,7 @@
 #include <assert.h>
-#include <chrono>
 #include <cmath>
-#include <cstddef>
-#include <cstdlib>
 #include <iostream>
-#include <new>
-#include <optional>
 #include <pthread.h>
-#include <thread>
 
 #include "range.h"
 #include "stack.h"
@@ -24,8 +18,20 @@ static pthread_mutex_t global_stack_mutex;
 static pthread_cond_t global_stack_cond;
 static int global_stack_waiters = 0;
 void global_stack_mutex_init() {
-    pthread_mutex_init(&global_stack_mutex, nullptr);
-    pthread_cond_init(&global_stack_cond, nullptr);
+    if (false
+        || !pthread_mutex_init(&global_stack_mutex, nullptr)
+        || !pthread_cond_init(&global_stack_cond, nullptr)
+    ) {
+        assert(0);
+    }
+}
+void global_stack_mutex_destroy() {
+    if (false
+        || !pthread_mutex_destroy(&global_stack_mutex)
+        || !pthread_cond_destroy(&global_stack_cond)
+    ) {
+        assert(0);
+    }
 }
 void global_stack_mutex_lock() {
     pthread_mutex_lock(&global_stack_mutex);
@@ -40,12 +46,6 @@ void global_stack_wait_event() {
 }
 void global_stack_broadcast_event() {
     pthread_cond_broadcast(&global_stack_cond);
-}
-void global_stack_increase_waiters() {
-    ++global_stack_waiters;
-}
-void global_stack_decrease_waiters() {
-    --global_stack_waiters;
 }
 
 
@@ -86,10 +86,11 @@ void balance_elements(ThreadData& data, Stack& stack, Stack& global_stack) {
     global_stack_mutex_unlock();
 }
 
-bool take_elements_from_global_stack(Stack& stack, Stack& global_stack, int size) {
+bool replenish_elements(Stack& stack, Stack& global_stack, int size) {
     global_stack_mutex_lock();
     if (!global_stack.is_empty()) {
-        int count = global_stack.get_occupancy()/size + global_stack.get_occupancy()%size;
+        int count = global_stack.get_occupancy() / size
+                  + global_stack.get_occupancy() % size;
         for (int q = 0; q < count; ++q) {
             Range range = global_stack.pop();
             stack.push(range);
@@ -149,7 +150,7 @@ void* thread_function(void* void_data) {
                 ++balance_time;
             }
         } else {
-            if (!take_elements_from_global_stack(stack, global_stack, data.size)) {
+            if (!replenish_elements(stack, global_stack, data.size)) {
                 break;
             }
         }
@@ -236,6 +237,8 @@ double global_stack_alg(
     delete [] thread_data_arr;
     delete [] thread_arr;
     ::operator delete[](local_stack_arr);
+
+    global_stack_mutex_destroy();
 
     return 0;
 }
