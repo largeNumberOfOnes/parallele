@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <limits.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,16 +21,6 @@ const cell CELL_ALIVE   = 1;
 const cell CELL_DYING   = 2;
 const cell CELL_NEWBORN = 3;
 
-typedef struct Message_t {
-    int skip_left;
-    int skip_right;
-    int buffer_size;
-    cell *left_far;
-    cell *left_near;
-    cell *right_far;
-    cell *right_near;
-} Message;
-
 typedef struct Index_t {
     int node;
     int node_count;
@@ -45,6 +36,19 @@ Index index_init(int node, int node_count, int rank, int rank_count) {
         .rank_count = rank_count,
     };
 }
+
+struct Game_t;
+
+typedef struct Message_t {
+    int skip_left;
+    int skip_right;
+    int buffer_size;
+    cell *left_far;
+    cell *left_near;
+    cell *right_far;
+    cell *right_near;
+    struct Game_t *game;
+} Message;
 
 typedef struct Time_t {
 
@@ -288,7 +292,8 @@ void game_start_game_loop(Game *game) {
             .left_near   = game->grid + h,
             .right_far   = game->grid + h * (w - 1),
             .right_near  = game->grid + h * (w - 2),
-            .buffer_size = game->h
+            .buffer_size = game->h,
+            .game        = game
         };
         game->exchange_edge(&message, &game->index);
         // usleep(100000);
@@ -625,6 +630,104 @@ void print_mpi(const struct Game_t *game, const Index *index) {
 
 // --------------------------------------------------------- Hybrid version
 
+static pthread_mutex_t exchange_edge_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int waiters_count = 0;
+static int out_waiters_count = 0;
+static int is_sem_inited = 0;
+static sem_t exchange_edge_sem;
+static sem_t exchange_edge_sem2;
+
+void exchange_edge_in_thread(Message *message, const Index *index) {
+    // if (!is_sem_inited && index->node == 0 && index->rank == 0) {
+    if (!is_sem_inited) {
+        sem_init(&exchange_edge_sem, 0, 0);
+        sem_init(&exchange_edge_sem2, 0, 0);
+        is_sem_inited = 1;
+    }
+    int rank = message->game->index.rank;
+    int size = index->rank_count;
+    int val = 0;
+    // sem_getvalue(&exchange_edge_sem, &val);
+    // if (val > 0) {
+    // DOTR
+    // #undef LOG
+    // #define LOG(...)
+    LOG("%d %d -> entering into", index->node, rank);
+    pthread_mutex_lock(&exchange_edge_mutex);
+    if (waiters_count != index->rank_count - 1) {
+        LOG("%d %d -> waiters is not enought", index->node, rank);
+        // DOTR
+        ++waiters_count;
+        pthread_mutex_unlock(&exchange_edge_mutex);
+        LOG("%d %d -> start waiting", index->node, rank);
+        sem_wait(&exchange_edge_sem);
+        LOG("%d %d -> end waiting", index->node, rank);
+        pthread_mutex_lock(&exchange_edge_mutex);
+        --waiters_count;
+        pthread_mutex_unlock(&exchange_edge_mutex);
+    } else {
+        pthread_mutex_unlock(&exchange_edge_mutex);
+    }
+    LOG("%d %d -> do job", index->node, rank);
+    // DOTR
+
+    if (rank != 0) {
+        LOG("%d %d -> setting something into left_arr", index->node, rank);
+        for (int q = 0; q < message->buffer_size; ++q) {
+            (message->left_near - 1 * message->buffer_size)[q] = CELL_ALIVE;
+            // (message->left_far - 1 * message->buffer_size)[q] = CELL_ALIVE;
+        }
+        // message->left_far[0] = CELL_ALIVE;
+        // message->left_far[message->buffer_size - 1] = CELL_ALIVE;
+        // memcpy(
+        //     message->left_far - 1 * message->buffer_size,
+        //     message->left_near,
+        //     message->buffer_size * sizeof(cell)
+        // );
+    }
+    if (rank + 1 != size) {
+        // memcpy(
+        //     message->right_far + 1 * message->buffer_size,
+        //     message->right_near,
+        //     message->buffer_size * sizeof(cell)
+        // );
+    }
+
+    // DOTR
+    LOG("%d %d -> end job", index->node, rank);
+    LOG("%d %d -> look on ", index->node, rank);
+    pthread_mutex_lock(&exchange_edge_mutex);
+    if (waiters_count != 0) {
+        LOG("%d %d -> say that next waiter can work", index->node, rank);
+        sem_post(&exchange_edge_sem);
+    }
+    pthread_mutex_unlock(&exchange_edge_mutex);
+
+    LOG("%d %d -> stay to wait other workers", index->node, rank);
+    pthread_mutex_lock(&exchange_edge_mutex);
+    if (out_waiters_count == index->rank_count - 1) {
+        LOG("%d %d -> all workers are there unlock them", index->node, rank);
+        sem_post(&exchange_edge_sem2);
+        pthread_mutex_unlock(&exchange_edge_mutex);
+    } else {
+        LOG("%d %d -> waiting other workers", index->node, rank);
+        ++out_waiters_count;
+        pthread_mutex_unlock(&exchange_edge_mutex);
+        sem_wait(&exchange_edge_sem2);
+        LOG("%d %d -> I may go away", index->node, rank);
+        pthread_mutex_lock(&exchange_edge_mutex);
+        --out_waiters_count;
+        if (out_waiters_count > 0) {
+            sem_post(&exchange_edge_sem2);
+            LOG("%d %d -> Say next may go away to", index->node, rank);
+        }
+        pthread_mutex_unlock(&exchange_edge_mutex);
+    }
+    LOG("%d %d -> goiing away", index->node, rank);
+
+
+}
+
 void exchange_edge_hybrid(Message *message, const Index *index) {
     int rank = index->node;
     int size = index->node_count;
@@ -636,15 +739,20 @@ void exchange_edge_hybrid(Message *message, const Index *index) {
         .send_right = 0
     };
     // code_skip(message);
-    first_stage(message, temp_buffer, &comm, rank, size);
-    third_stage(message, temp_buffer, &comm, rank, size);
-    int skips[2];
+    sleep(1);
+    exchange_edge_in_thread(message, index);
+    printf("------------------------------------------- %d %d\n", index->node, index->rank);
+    // sleep(10);
+    // first_stage(message, temp_buffer, &comm, rank, size);
+    // third_stage(message, temp_buffer, &comm, rank, size);
+
+    // int skips[2];
     // decode_skip(message, skips);
     
     // comm_set_new_val(&comm, message, skips);
     // comm_timer_step(&comm);
 
-    thread_barier()
+    // thread_barier()
 
     free(temp_buffer);
 }
@@ -654,10 +762,11 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
         const int main_node = 0;
         int node = index->node;
         int size = index->node_count;
-        int w = (game->w - 2) * index->rank_count;
+        int w = game->w;
         int h = game->h;
-        cell *grid = game->grid + 1;
+        cell *grid = game->grid;
         int grid_size = w * h;
+        int whole_grid_size = w * index->rank_count * h;
         cell *buffer = NULL;
         if (node == main_node) {
             buffer = (cell*) malloc(size * grid_size * sizeof(cell));
@@ -671,14 +780,22 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
             )
         );
         if (node == main_node) {
+            printf("----------------------------------------------------\n");
             for (int y = 0; y < h; ++y) {
                 for (int proc = 0; proc < size; ++proc) {
-                    for (int x = 0; x < w; ++x) {
-                        if ((buffer + grid_size*proc)[x * h + y]) {
-                            printf("#");
-                        } else {
-                            printf("_");
+                    for (int th = 0; th < index->rank_count; ++th) {
+                        for (int x = 0; x < w; ++x) {
+                            if (
+                                (buffer
+                                    + grid_size*th
+                                    + whole_grid_size*proc
+                                )[x * h + y]) {
+                                printf("#");
+                            } else {
+                                printf("_");
+                            }
                         }
+                        printf(" ");
                     }
                 }
                 printf("\n");
@@ -697,8 +814,8 @@ int main_sequantial(int argc, char **argv) {
 
     Index index = index_init(0, 1, 0, 1);
     Game game = game_init(
-        10,
-        10,
+        100,
+        20,
         index,
         start_time,
         exchange_edge,
@@ -763,7 +880,7 @@ void *thread_function(void *data_void) {
 
     game_start_game_loop(&game);
 
-    // game_dstr(&game);
+    game_dstr(&game);
 
     return NULL;
 }
@@ -778,8 +895,8 @@ int main_hybrid(int argc, char **argv) {
     assert(size == 2);
 
     int thread_grid_width = 15;
-    int thread_per_proc = 2;
-    int w = thread_grid_width + 2 * thread_per_proc + 2;
+    int threads_per_proc = 3;
+    int w = (thread_grid_width + 2) * threads_per_proc;
     int h = 20;
     cell *grid = (cell*) malloc(h * w * sizeof(cell));
     for (int x = 0; x < w; ++x) {
@@ -787,34 +904,39 @@ int main_hybrid(int argc, char **argv) {
             grid[x * h + y] = CELL_DEAD;
         }
     }
+    for (int x = 0; x < w; ++x) {
+        // if (x % 2 == 0) {
+        //     grid [x * h + x/2] = CELL_ALIVE;
+        // }
+        if (x == thread_grid_width) {
+            grid [x * h + 1] = CELL_ALIVE;
+        }
+    }
     if (rank == 0) {
         draw_lwss(grid, w, h);
     }
-DOT
-    pthread_t *thread_arr = (pthread_t*) malloc(thread_per_proc *
+
+    pthread_t *thread_arr = (pthread_t*) malloc(threads_per_proc *
                                                     sizeof(pthread_t));
-    ThreadData *data_arr = (ThreadData*) malloc(thread_per_proc * 
+    ThreadData *data_arr = (ThreadData*) malloc(threads_per_proc * 
                                                     sizeof(ThreadData));
-    for (int q = 0; q < thread_per_proc; ++q) {
+    for (int q = 0; q < threads_per_proc; ++q) {
         data_arr[q] = (ThreadData) {
-            .index = index_init(rank, 2, q, thread_per_proc),
-            .grid  = grid + (thread_grid_width - 2) * q,
-            .w = thread_grid_width,
+            .index = index_init(rank, 2, q, threads_per_proc),
+            .grid  = grid + (thread_grid_width + 2) * q,
+            .w = thread_grid_width + 2,
             .h = h
         };
+        if (q != 0) {
+            pthread_create(
+                &(thread_arr[q]),
+                NULL,
+                thread_function,
+                (void*) (&data_arr[q])
+            );
+        }
     }
-DOT
-    for (int thread_num = 1; thread_num < thread_per_proc; ++thread_num) {
-        pthread_create(
-            &(thread_arr[thread_num]),
-            NULL,
-            thread_function,
-            (void*) (&data_arr[thread_num])
-        );
-    }
-DOT
     thread_function((void*) data_arr);
-DOT
 
     free(thread_arr);
     free(data_arr);
@@ -825,6 +947,6 @@ DOT
 
 int main(int argc, char **argv) {
     // return main_sequantial(argc, argv);
-    return main_mpi(argc, argv);
-    // return main_hybrid(argc, argv);
+    // return main_mpi(argc, argv);
+    return main_hybrid(argc, argv);
 }
