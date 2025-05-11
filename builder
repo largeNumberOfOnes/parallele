@@ -376,3 +376,13 @@ def parse_args() -> None:
 if __name__ == '__main__':
     args = parse_args()
     args.func(args)
+
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--args', nargs='+')
+    # parser.add_argument('--flags', nargs='+')
+    # args = parser.parse_args()
+    # print(args)
+
+    # ret = os.system('ls we')
+    # print(f'{ret = }')
+

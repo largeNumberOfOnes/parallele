@@ -123,9 +123,11 @@ static inline void rprint_arr(int *arr, int count) {
     free(str);
 }
 
-#define LOG(what_to_do) what_to_do
+#define LOG(...) printf(__VA_ARGS__); printf("\n");
+#define PRINT_NAME(name) std::cout << #name << " = " << (name) << std::endl;
 
-#define DOT printf("\033[95mDOT from line: %d\033[39m\n", __LINE__);
+#define DOT printf("\033[95mDOT from line: %d, %s\033[39m\n", __LINE__, __FILE__); fflush(stdout);
+// #define DOT printf("\033[95mDOT from line: %d, %d, %s\033[39m\n", __LINE__, gettid(), __FILE__); fflush(stdout);
 #define DOTR {                                                            \
     MPI_Barrier(MPI_COMM_WORLD);                                          \
     printf("\033[95mDOT %d from line: %d\033[39m\n", rank, __LINE__);     \

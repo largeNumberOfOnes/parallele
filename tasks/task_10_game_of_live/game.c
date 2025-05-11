@@ -1,3 +1,43 @@
+/**
+ * Game of Life
+ * Here we present three realizations of the game: a sequential version,
+ *     a version for a distributed memory system based on the MPI
+ *     interface, and a hybrid version running on two nodes with
+ *     different memory pools and containing the same number of threads
+ *     communicating via shared memory. Each version can be run in two
+ *     modes: fast with a large playing field and without frame-by-frame
+ *     rendering, and with field rendering. The mode is defined by the
+ *     GMODE macro, which takes values 0 and 1. Version is defined by
+ *     GTYPE macro, which accepts values from one to three in the
+ *     specified order.
+ * Macro GCOUNT determines count of executers for second version and
+ *     count of threads for third version of game.
+ * If macro USE_SKIP_OPTIMIZATION does not defined MPI version will not
+ *     use skip optimization.
+ */
+
+#ifndef GTYPE
+    #define GTYPE 0
+#endif
+#ifndef GMODE
+    #define GMODE 0
+#endif
+#ifndef GCOUNT
+    #define GCOUNT 1
+#endif
+
+#define USE_SKIP_OPTIMIZATION
+
+#if GTYPE < 0 || 2 < GTYPE
+    #error "GTYPE must be in range 0, 2"
+#endif
+#if GMODE < 0 || 1 < GMODE
+    #error "GMODE must be in range 0, 1"
+#endif
+#if GCOUNT < 0
+    #error "GCOUNT must be positive"
+#endif
+
 #include <assert.h>
 #include <bits/pthreadtypes.h>
 #include <limits.h>
@@ -68,11 +108,11 @@ typedef struct Game_t {
     Index index;
     int skip_right;
     int skip_left;
-    void (*start_time)    (Time *time, const Index *index);
-    void (*exchange_edge) (Message *message, const Index *index);
+    void (*start_time)    (Time *time, void *adat, const Index *index);
+    void (*exchange_edge) (Message *message, void *adat, const Index *index);
     void (*print)         (const struct Game_t *game, const Index *index);
-    void (*end_time)      (Time *time, const Index *index);
-    void (*exchenge_time) (Time *time, const Index *index);
+    void (*end_time)      (Time *time, void *adat, const Index *index);
+    void (*exchange_time) (Time *time, void *adat, const Index *index);
     void *adat; // Additinal data for different realizations
 } Game;
 
@@ -111,11 +151,11 @@ Game game_init_with_grid(
     int h,
     Index index,
     cell *grid,
-    void (*start_time)    (Time *time, const Index *index),
-    void (*exchange_edge) (Message *message, const Index *index),
+    void (*start_time)    (Time *time, void *adat, const Index *index),
+    void (*exchange_edge) (Message *message, void *adat, const Index *index),
     void (*print)         (const struct Game_t *game, const Index *index),
-    void (*end_time)      (Time *time, const Index *index),
-    void (*exchenge_time) (Time *time, const Index *index),
+    void (*end_time)      (Time *time, void *adat, const Index *index),
+    void (*exchenge_time) (Time *time, void *adat, const Index *index),
     void *adat
 ) {
     return (Game) {
@@ -129,7 +169,7 @@ Game game_init_with_grid(
         .exchange_edge       = exchange_edge,
         .print               = print,
         .end_time            = end_time,
-        .exchenge_time       = exchenge_time,
+        .exchange_time       = exchenge_time,
         .adat                = adat
     };
 }
@@ -138,11 +178,11 @@ Game game_init(
     int w,
     int h,
     Index index,
-    void (*start_time)    (Time *time, const Index *index),
-    void (*exchange_edge) (Message *message, const Index *index),
+    void (*start_time)    (Time *time, void *adat, const Index *index),
+    void (*exchange_edge) (Message *message, void *adat, const Index *index),
     void (*print)         (const struct Game_t *game, const Index *index),
-    void (*end_time)      (Time *time, const Index *index),
-    void (*exchenge_time) (Time *time, const Index *index),
+    void (*end_time)      (Time *time, void *adat, const Index *index),
+    void (*exchenge_time) (Time *time, void *adat, const Index *index),
     void *adat
 ) {
     cell *grid = (cell*) malloc(sizeof(cell) * w * h);
@@ -168,7 +208,7 @@ Game game_init(
         .exchange_edge       = exchange_edge,
         .print               = print,
         .end_time            = end_time,
-        .exchenge_time       = exchenge_time,
+        .exchange_time       = exchenge_time,
         .adat                = adat
     };
 }
@@ -275,15 +315,24 @@ static void evalute(Game *game) {
             skip_right = game->w - x - 2;
         }
     }
-    game->skip_left  = skip_left;
-    game->skip_right = skip_right;
+    #ifdef USE_SKIP_OPTIMIZATION
+        game->skip_left  = skip_left;
+        game->skip_right = skip_right;
+    #else
+        game->skip_left  = 0;
+        game->skip_right = 0;
+    #endif
 }
 
 void game_start_game_loop(Game *game) {
     Time time = time_init();
-    game->print(game, &game->index);
+    #if GMODE == 1
+        game->print(game, &game->index);
+    #endif
     while (1) {
-        // game->start_time(&time);
+        #if GMODE == 0
+            game->start_time(&time, game->adat, &game->index);
+        #endif
         evalute(game);
         int w = game->w;
         int h = game->h;
@@ -297,22 +346,45 @@ void game_start_game_loop(Game *game) {
             .buffer_size = game->h,
             .game        = game
         };
-        game->exchange_edge(&message, &game->index);
+        game->exchange_edge(&message, game->adat, &game->index);
         // usleep(100000);
-        game->print(game, &game->index);
-        // game->end_time(&time);
-        // game->exchenge_time(&time);
-        usleep(100000);
+        #if GMODE == 1
+            game->print(game, &game->index);
+            usleep(50000);
+        #endif
+        #if GMODE == 0
+            game->end_time(&time, game->adat, &game->index);
+            game->exchange_time(&time, game->adat, &game->index);
+        #endif
     }
 }
 
 // ---------------------------------------------------- Default realization
 
-void start_time(Time *time, const Index *index) {}
-void exchange_edge (Message *message, const Index *index) {}
+static clock_t start, end;
+const static int clock_timer_start = 100;
+static int clock_timer = clock_timer_start;
+void start_time(Time *time, void *adat, const Index *index) {
+    if (index->rank == 0 && index->node == 0
+                                    && clock_timer == clock_timer_start) {
+        start = clock();
+    }
+}
+void exchange_edge (Message *message, void *adat, const Index *index) {}
 void print(const struct Game_t *game, const Index *index) {}
-void end_time(Time *time, const Index *index) {}
-void exchenge_time(Time *time, const Index *index) {}
+void end_time(Time *time, void *adat, const Index *index) {
+    if (index->rank == 0 && index->node == 0) {
+        if ( !clock_timer) {
+            end = clock();
+            printf("time: %f\n", (double)(end - start)/CLOCKS_PER_SEC);
+            fflush(stdout);
+            clock_timer = clock_timer_start;
+        } else {
+            --clock_timer;
+        }
+    }
+}
+void exchenge_time(Time *time, void *adat, const Index *index) {}
 
 // ----------------------------------------------------- Sequamtial version
 
@@ -570,7 +642,7 @@ static void decode_skip(Message *message, int skips[2]) {
 }
 
 
-void exchange_edge_mpi(Message *message, const Index *index) {
+void exchange_edge_mpi(Message *message, void *adat, const Index *index) {
     int rank = index->rank;
     int size = index->rank_count;
     cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
@@ -632,26 +704,97 @@ void print_mpi(const struct Game_t *game, const Index *index) {
 
 // --------------------------------------------------------- Hybrid version
 
-static pthread_mutex_t exchange_edge_mutex = PTHREAD_MUTEX_INITIALIZER;
-static int waiters_count = 0;
-static int out_waiters_count = 0;
-static int is_sem_inited = 0;
-static sem_t exchange_edge_sem;
-static sem_t exchange_edge_sem2;
+typedef struct Adat_nybryd_t {
+    pthread_barrier_t barrier;
+} Adat_nybryd;
 
 void exchange_edge_in_thread(Message *message, const Index *index) {
-    if (!is_sem_inited) {
-        sem_init(&exchange_edge_sem, 0, 0);
-        sem_init(&exchange_edge_sem2, 0, 0);
-        is_sem_inited = 1;
+    if (index->rank == 0) {
+        cell *grid = message->game->grid;
+        int edje_size = message->buffer_size;
+        int w = message->game->w;
+        int h = message->game->h;
+        for (int q = 0; q < index->rank_count; ++q) {
+            cell *self_right = message->right_near + w*h*q;
+            cell *self_left  = message->left_near  + w*h*q;
+            cell *left_right = message->right_far  + w*h*(q-1);
+            cell *right_left = message->left_far   + w*h*(q+1);
+            if (q != 0) {
+                memcpy(left_right, self_left, edje_size);
+            }
+            if (q + 1 != index->rank_count) {
+                memcpy(right_left, self_right, edje_size);
+            }
+        }
     }
-    int rank = message->game->index.rank;
-    int size = index->rank_count;
-    int val = 0;
- 
 }
 
-void exchange_edge_hybrid(Message *message, const Index *index) {
+void exchange_edge_between(Message *message, const Index *index) {
+    int w = message->game->w;
+    int h = message->game->h;
+    cell *right_near = message->right_near + w*h*(index->rank_count - 1);
+    cell *right_far  = message->right_far  + w*h*(index->rank_count - 1);
+    cell *left_near  = message->left_near;
+    cell *left_far   = message->left_far;
+    int count = message->buffer_size;
+    const int TAG_SEND_EDJE_HYBRID = 1;
+    if (index->rank != 0) {
+        return;
+    }
+    if (index->node == 0) {
+        RET_IF_ERR(
+            MPI_Send(
+                right_near, count, MPI_CHAR,
+                1, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD
+            )
+        );
+        RET_IF_ERR(
+            MPI_Send(
+                left_near, count, MPI_CHAR,
+                1, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD
+            )
+        );
+        RET_IF_ERR(
+            MPI_Recv(
+                left_far, count, MPI_CHAR,
+                1, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+            )
+        );
+        RET_IF_ERR(
+            MPI_Recv(
+                right_far, count, MPI_CHAR,
+                1, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+            )
+        );
+    } else {
+        RET_IF_ERR(
+            MPI_Recv(
+                left_far, count, MPI_CHAR,
+                0, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+            )
+        );
+        RET_IF_ERR(
+            MPI_Recv(
+                right_far, count, MPI_CHAR,
+                0, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD, MPI_STATUS_IGNORE
+            )
+        );
+        RET_IF_ERR(
+            MPI_Send(
+                right_near, count, MPI_CHAR,
+                0, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD
+            )
+        );
+        RET_IF_ERR(
+            MPI_Send(
+                left_near, count, MPI_CHAR,
+                0, TAG_SEND_EDJE_HYBRID, MPI_COMM_WORLD
+            )
+        );
+    }
+}
+
+void exchange_edge_hybrid(Message *message, void *adat, const Index *index) {
     int rank = index->node;
     int size = index->node_count;
     cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
@@ -662,20 +805,14 @@ void exchange_edge_hybrid(Message *message, const Index *index) {
         .send_right = 0
     };
     // code_skip(message);
-    sleep(1);
+    // sleep(1);
+    Adat_nybryd * adath =(Adat_nybryd*) adat;
+    pthread_barrier_wait(&adath->barrier);
+
     exchange_edge_in_thread(message, index);
-    printf("------------------------------------------- %d %d\n", index->node, index->rank);
-    // sleep(10);
-    // first_stage(message, temp_buffer, &comm, rank, size);
-    // third_stage(message, temp_buffer, &comm, rank, size);
+    exchange_edge_between(message, index);
 
-    // int skips[2];
-    // decode_skip(message, skips);
-    
-    // comm_set_new_val(&comm, message, skips);
-    // comm_timer_step(&comm);
-
-    // thread_barier()
+    pthread_barrier_wait(&adath->barrier);
 
     free(temp_buffer);
 }
@@ -703,7 +840,6 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
             )
         );
         if (node == main_node) {
-            printf("--------------------------------------------------\n");
             for (int y = 0; y < h; ++y) {
                 for (int proc = 0; proc < size; ++proc) {
                     for (int th = 0; th < index->rank_count; ++th) {
@@ -721,7 +857,7 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
                         }
                         printf(" ");
                     }
-                    printf(" | ");
+                    printf("| ");
                 }
                 printf("\n");
             }
@@ -731,19 +867,16 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
             free(buffer);
         }
     }
-    sleep(100);
-    // pthread_barrier_t barrier = 
-    // pthread_barrier_wait(&barrier);
 }
 
 // --------------------------------------------------------- main functions
 
-int main_sequantial(int argc, char **argv) {
+int main_sequantial(int argc, char **argv, int ws, int hs, int count) {
 
     Index index = index_init(0, 1, 0, 1);
     Game game = game_init(
-        100,
-        20,
+        ws,
+        hs,
         index,
         start_time,
         exchange_edge,
@@ -758,7 +891,7 @@ int main_sequantial(int argc, char **argv) {
     return 0;
 }
 
-int main_mpi(int argc, char **argv) {
+int main_mpi(int argc, char **argv, int ws, int hs, int count) {
 
     MPI_Init(&argc, &argv);
 
@@ -768,8 +901,8 @@ int main_mpi(int argc, char **argv) {
 
     Index index = index_init(0, 1, rank, size);
     Game game = game_init(
-        30,
-        20,
+        ws,
+        hs/size,
         index,
         start_time,
         exchange_edge_mpi,
@@ -791,6 +924,7 @@ typedef struct ThreadData_t {
     cell *grid;
     int w;
     int h;
+    Adat_nybryd *adat;
 } ThreadData;
 
 void *thread_function(void *data_void) {
@@ -806,7 +940,7 @@ void *thread_function(void *data_void) {
         print_hybrid,
         end_time,
         exchenge_time,
-        NULL
+        (void*) data->adat
     );
 
     game_start_game_loop(&game);
@@ -816,7 +950,7 @@ void *thread_function(void *data_void) {
     return NULL;
 }
 
-int main_hybrid(int argc, char **argv) {
+int main_hybrid(int argc, char **argv, int ws, int hs, int count) {
 
     MPI_Init(&argc, &argv);
 
@@ -825,41 +959,35 @@ int main_hybrid(int argc, char **argv) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     assert(size == 2);
 
-    int thread_grid_width = 15;
-    int threads_per_proc = 3;
-    int w = (thread_grid_width + 2) * threads_per_proc;
-    int h = 20;
+    int thread_grid_width = ws/2/count;
+    int threads_per_node = count;
+    int w = (thread_grid_width + 2) * threads_per_node;
+    int h = hs;
     cell *grid = (cell*) malloc(h * w * sizeof(cell));
     for (int x = 0; x < w; ++x) {
         for (int y = 0; y < h; ++y) {
             grid[x * h + y] = CELL_DEAD;
         }
     }
-    // for (int x = 0; x < w; ++x) {
-    //     // if (x % 2 == 0) {
-    //     //     grid [x * h + x/2] = CELL_ALIVE;
-    //     // }
-    //     if (x == thread_grid_width) {
-    //         grid [x * h + 1] = CELL_ALIVE;
-    //     }
-    // }
     if (rank == 0) {
         draw_lwss(grid, w, h);
-    } else {
-        draw_glider(grid, w, h, 2, 2);
-        draw_glider(grid, w, h, 2, 10);
     }
 
-    pthread_t *thread_arr = (pthread_t*) malloc(threads_per_proc *
+    Adat_nybryd adat;
+    int err = pthread_barrier_init(&adat.barrier, NULL, threads_per_node);
+    assert(err == 0);
+
+    pthread_t *thread_arr = (pthread_t*) malloc(threads_per_node *
                                                     sizeof(pthread_t));
-    ThreadData *data_arr = (ThreadData*) malloc(threads_per_proc * 
+    ThreadData *data_arr = (ThreadData*) malloc(threads_per_node * 
                                                     sizeof(ThreadData));
-    for (int q = 0; q < threads_per_proc; ++q) {
+    for (int q = 0; q < threads_per_node; ++q) {
         data_arr[q] = (ThreadData) {
-            .index = index_init(rank, size, q, threads_per_proc),
-            .grid  = grid + 1 + (thread_grid_width + 2) * q,
-            .w = thread_grid_width,
-            .h = h
+            .index = index_init(rank, size, q, threads_per_node),
+            .grid  = grid + (thread_grid_width + 2) * h * q,
+            .w = thread_grid_width + 2,
+            .h = h,
+            .adat = &adat
         };
         if (q != 0) {
             pthread_create(
@@ -881,7 +1009,14 @@ int main_hybrid(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
-    // return main_sequantial(argc, argv);
-    // return main_mpi(argc, argv);
-    return main_hybrid(argc, argv);
+    int ws = 1000;
+    int hs = 100;
+    int count = GCOUNT;
+    #if GTYPE == 0
+        return main_sequantial(argc, argv, ws, hs, count);
+    #elif GTYPE == 1
+        return main_mpi(argc, argv, ws, hs, count);
+    #elif GTYPE == 2
+        return main_hybrid(argc, argv, ws, hs, count);
+    #endif
 }
