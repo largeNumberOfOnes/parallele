@@ -189,13 +189,12 @@ Game game_init(
     srand(7);
     for (int x = 0; x < w; ++x) {
         for (int y = 0; y < h; ++y) {
-            // grid[y * w + x] = (rand() % 20 == 7) ? CELL_ALIVE : CELL_DEAD;
             grid[x * h + y] = CELL_DEAD;
         }
     }
     if (index.rank == 0) {
         draw_lwss(grid, w, h);
-        // draw_glider(grid, w, h, 2, 2);
+        // draw_glider(grid, w, h, 2, 10);
     }
     return (Game) {
         .w = w,
@@ -347,10 +346,9 @@ void game_start_game_loop(Game *game) {
             .game        = game
         };
         game->exchange_edge(&message, game->adat, &game->index);
-        // usleep(100000);
         #if GMODE == 1
             game->print(game, &game->index);
-            usleep(50000);
+            usleep(100000);
         #endif
         #if GMODE == 0
             game->end_time(&time, game->adat, &game->index);
@@ -362,26 +360,28 @@ void game_start_game_loop(Game *game) {
 // ---------------------------------------------------- Default realization
 
 static clock_t start, end;
-const static int clock_timer_start = 100;
-static int clock_timer = clock_timer_start;
+const static int clock_timer_start = 10;
+static int clock_timer = 0;
 void start_time(Time *time, void *adat, const Index *index) {
     if (index->rank == 0 && index->node == 0
-                                    && clock_timer == clock_timer_start) {
-        start = clock();
+                                    && clock_timer == 0) {
     }
+    start = clock();
 }
 void exchange_edge (Message *message, void *adat, const Index *index) {}
 void print(const struct Game_t *game, const Index *index) {}
 void end_time(Time *time, void *adat, const Index *index) {
+    end = clock();
     if (index->rank == 0 && index->node == 0) {
-        if ( !clock_timer) {
-            end = clock();
-            printf("time: %f\n", (double)(end - start)/CLOCKS_PER_SEC);
-            fflush(stdout);
-            clock_timer = clock_timer_start;
-        } else {
-            --clock_timer;
-        }
+        // if (clock_timer >= clock_timer_start) {
+        printf("time: %f\n", (double)(end - start)/CLOCKS_PER_SEC);
+        fflush(stdout);
+            // sleep(3);
+            // start = end;
+            // clock_timer = 0;
+        // } else {
+        //     ++clock_timer;
+        // }
     }
 }
 void exchenge_time(Time *time, void *adat, const Index *index) {}
@@ -794,7 +794,8 @@ void exchange_edge_between(Message *message, const Index *index) {
     }
 }
 
-void exchange_edge_hybrid(Message *message, void *adat, const Index *index) {
+void exchange_edge_hybrid(Message *message, void *adat,
+                                                    const Index *index) {
     int rank = index->node;
     int size = index->node_count;
     cell *temp_buffer = (cell*) malloc(message->buffer_size*sizeof(cell));
@@ -843,7 +844,7 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
             for (int y = 0; y < h; ++y) {
                 for (int proc = 0; proc < size; ++proc) {
                     for (int th = 0; th < index->rank_count; ++th) {
-                        for (int x = 0; x < w; ++x) {
+                        for (int x = 1; x + 1 < w; ++x) {
                             if (
                                 *(buffer
                                     + whole_grid_size*proc
@@ -855,9 +856,9 @@ void print_hybrid(const struct Game_t *game, const Index *index) {
                                 printf("_");
                             }
                         }
-                        printf(" ");
+                        // printf(" ");
                     }
-                    printf("| ");
+                    // printf("| ");
                 }
                 printf("\n");
             }
@@ -930,6 +931,8 @@ typedef struct ThreadData_t {
 void *thread_function(void *data_void) {
     ThreadData *data = (ThreadData*) data_void;
 
+    printf("%d %d %d %d\n", data->index.node, data->index.rank, data->w, data->h);
+
     Game game = game_init_with_grid(
         data->w,
         data->h,
@@ -971,6 +974,9 @@ int main_hybrid(int argc, char **argv, int ws, int hs, int count) {
     }
     if (rank == 0) {
         draw_lwss(grid, w, h);
+    } else {
+        draw_glider(grid, w, h, 2, 2);
+        draw_glider(grid, w, h, 2, 10);
     }
 
     Adat_nybryd adat;
@@ -1009,8 +1015,8 @@ int main_hybrid(int argc, char **argv, int ws, int hs, int count) {
 }
 
 int main(int argc, char **argv) {
-    int ws = 1000;
-    int hs = 100;
+    int ws = 2000;
+    int hs = 10000;
     int count = GCOUNT;
     #if GTYPE == 0
         return main_sequantial(argc, argv, ws, hs, count);
