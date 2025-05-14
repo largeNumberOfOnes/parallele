@@ -1015,8 +1015,8 @@ int main_hybrid(int argc, char **argv, int ws, int hs, int count) {
 }
 
 int main(int argc, char **argv) {
-    int ws = 2000;
-    int hs = 10000;
+    int ws = 20;
+    int hs = 10;
     int count = GCOUNT;
     #if GTYPE == 0
         return main_sequantial(argc, argv, ws, hs, count);

@@ -8,6 +8,9 @@
 
 
 
+constexpr int balance_count = 10;
+constexpr int initial_count = 400;
+
 constexpr std::size_t local_stack_size  = 10000;
 constexpr std::size_t global_stack_size = 10000;
 constexpr int main_rank = 0;
@@ -142,7 +145,7 @@ void* thread_function(void* void_data) {
             } else {
                 *data.sum += sabc;
             }
-            if (balance_time == 40) {
+            if (balance_time == balance_count) {
                 
                 balance_elements(data, stack, global_stack);
                 balance_time = 0;
@@ -168,14 +171,13 @@ double global_stack_alg(
     assert(range.is_valid());
     assert(f);
     assert(proc_count > 0);
-
     global_stack_mutex_init();
 
     Stack global_stack{global_stack_size};
     Stack* local_stack_arr = reinterpret_cast<Stack*>(
         ::operator new[](proc_count * sizeof(Stack))
     );
-    constexpr int count_per_proc = 10;
+    constexpr int count_per_proc = initial_count;
     double delta = range.get_len() / count_per_proc / proc_count;
     for (int q = 0; q < proc_count; ++q) {
         new(&local_stack_arr[q]) Stack{local_stack_size};
@@ -227,7 +229,7 @@ double global_stack_alg(
         std::cout << sum_arr[q] << " ";
         sum += sum_arr[q];
     }
-        std::cout << std::endl;
+    std::cout << std::endl;
 
     for (int q = 0; q < proc_count; ++q) {
         local_stack_arr[q].~Stack();
