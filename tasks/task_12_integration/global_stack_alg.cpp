@@ -20,7 +20,7 @@ static bool stop_signal = false;
 static pthread_mutex_t global_stack_mutex;
 static pthread_cond_t global_stack_cond;
 static int global_stack_waiters = 0;
-void global_stack_mutex_init() {
+static void global_stack_mutex_init() {
     if (false
         || pthread_mutex_init(&global_stack_mutex, nullptr)
         || pthread_cond_init(&global_stack_cond, nullptr)
@@ -28,7 +28,7 @@ void global_stack_mutex_init() {
         assert(0);
     }
 }
-void global_stack_mutex_destroy() {
+static void global_stack_mutex_destroy() {
     if (false
         || pthread_mutex_destroy(&global_stack_mutex)
         || pthread_cond_destroy(&global_stack_cond)
@@ -36,18 +36,18 @@ void global_stack_mutex_destroy() {
         assert(0);
     }
 }
-void global_stack_mutex_lock() {
+static void global_stack_mutex_lock() {
     pthread_mutex_lock(&global_stack_mutex);
 }
-void global_stack_mutex_unlock() {
+static void global_stack_mutex_unlock() {
     pthread_mutex_unlock(&global_stack_mutex);
 }
-void global_stack_wait_event() {
+static void global_stack_wait_event() {
     ++global_stack_waiters;
     pthread_cond_wait(&global_stack_cond, &global_stack_mutex);
     --global_stack_waiters;
 }
-void global_stack_broadcast_event() {
+static void global_stack_broadcast_event() {
     pthread_cond_broadcast(&global_stack_cond);
 }
 
@@ -64,7 +64,7 @@ struct ThreadData {
     double* sum;
 };
 
-void balance_elements(ThreadData& data, Stack& stack, Stack& global_stack) {
+static void balance_elements(ThreadData& data, Stack& stack, Stack& global_stack) {
     if (data.rank == main_rank) {
         int mean = 0;
         for (int q = 0; q < data.size; ++q) {
@@ -89,7 +89,7 @@ void balance_elements(ThreadData& data, Stack& stack, Stack& global_stack) {
     global_stack_mutex_unlock();
 }
 
-bool replenish_elements(Stack& stack, Stack& global_stack, int size) {
+static bool replenish_elements(Stack& stack, Stack& global_stack, int size) {
     global_stack_mutex_lock();
     if (!global_stack.is_empty()) {
         int count = global_stack.get_occupancy() / size
@@ -171,6 +171,7 @@ double global_stack_alg(
     assert(range.is_valid());
     assert(f);
     assert(proc_count > 0);
+    
     global_stack_mutex_init();
 
     Stack global_stack{global_stack_size};
